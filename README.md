@@ -21,8 +21,9 @@ Photo ──▶ on-device fit ──▶ rigged ARKit head ──▶ Manual tray 
 
 Recording captures the WebGL canvas (`captureStream` → `MediaRecorder`), prefers
 MP4/H.264 where the platform supports it and falls back to WebM/VP9, optionally mixes in
-the microphone, optionally bakes a watermark, and shares through the Web Share API with a
-download fallback.
+the microphone, optionally adds a watermark (drawn *inside* the scene, so the capture never
+reads the drawing buffer back), and shares through the Web Share API with a download
+fallback.
 
 ## Quick start
 
@@ -32,8 +33,13 @@ npm run dev        # http://localhost:5173 — bind to 0.0.0.0 for LAN/phone tes
 npm run build      # type-check, bundle, generate the service worker
 npm run preview    # serve dist/ on 4173
 npm run lint       # eslint, flat config
-npm test           # node:test — filter, env and asset unit tests
+npm test           # node:test — filter, env, manual-input and asset unit tests
 npm run icons      # regenerate the PWA icons
+
+# verification probes (no browser needed — see docs/REALISM.md, docs/PERFORMANCE.md)
+npm run probe:geometry   # software-render the bust from the real geometry
+npm run probe:realism    # before/after renders of the lighting + material pass
+npm run probe:perf       # per-frame JavaScript cost of the app's own hot path
 ```
 
 `npm run dev` and `npm run build` both run `predev`/`prebuild`, which stage the runtime
@@ -93,6 +99,19 @@ in the picker before anything runs.
 Full findings, including Avaturn's current pricing and terms and the reasoning for not
 defaulting to it, are in [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
+### Rendering and realism
+
+One soft studio, one shadow-casting key, `ACESFilmicToneMapping` with `EXPOSURE 0.92`,
+sRGB output, a small HDR environment, and a camera-axis catchlight that puts a specular dot
+in each cornea. Skin is `MeshPhysicalMaterial` at `roughness 0.55`, `ior 1.4` and
+`specularIntensity 0.6` with a warm sheen and an `onBeforeCompile` subsurface term; eyes
+are deliberately two-layered (a slightly rough sclera under a near-mirror clearcoat) because
+one glossy sphere reads as a marble. The idle animator drifts its blink rate, follows blinks
+with the brow, and keeps a tremor so the face is never perfectly still.
+
+What changed in the realism pass, why, and the before/after renders:
+**[docs/REALISM.md](docs/REALISM.md)**.
+
 ### Tracking
 
 MediaPipe Face Landmarker (`runningMode: 'VIDEO'`, `outputFaceBlendshapes`,
@@ -120,6 +139,10 @@ watchdog and says so. Lite also releases the GPU delegate to the CPU so renderin
 its budget.
 
 ## Deploying
+
+**There is no live URL yet** — deploying needs hosting credentials this project does not
+have. Full step-by-step instructions, the pre-deploy checklist and the post-deploy
+verification list are in **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 The app is a static SPA. Any static host works; two one-liners:
 
@@ -149,6 +172,12 @@ it along with the preferences and the cached model files.
 
 ## Performance notes
 
+Measured per-frame JavaScript cost is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md),
+together with the 6× CPU-throttle procedure and what to expect on a mid-range Android. The
+short version: the app's own animation/filtering code costs ~1 µs per frame, the lite tier
+updates the rig at 30 Hz while rendering uncapped, and **no frame rate has been measured for
+this project** because there is no browser in the environment it was built in.
+
 * First meaningful paint does not include the tracker: MediaPipe's JS, WASM and model
   (~17 MB raw) load only when Live mode is entered, and are excluded from the service
   worker precache but runtime-cached after the first use.
@@ -171,6 +200,13 @@ it along with the preferences and the cached model files.
 * Recording is capped at 90 seconds per clip, and Safari records MP4 only.
 * Back-camera mode tracks only if a face is visible in the frame; there is no
   face-detection assist for aiming.
+* **Nothing here has been run in a browser.** Type-checking, linting, unit tests, the
+  production build, the asset graph and the offline renders are all verified; camera
+  permission, real recording output, gestures, iOS Safari quirks and frame rate are not.
+  [docs/DEPLOY.md §4](docs/DEPLOY.md) is the checklist that closes that gap.
+* The before/after renders are software-rasteriser images of the real geometry and the real
+  constants, not browser screenshots — no textures, no HDR, no shadows. See
+  [docs/REALISM.md](docs/REALISM.md).
 
 ## Next three upgrades
 

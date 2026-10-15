@@ -24,10 +24,9 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import * as THREE from 'three'
 import { Renderer } from './lib/raster.mjs'
 import { distanceAttenuation } from './lib/shade.mjs'
-import { loadBust, PROBE_COLORS, ROOT, W, H } from './lib/bust.mjs'
+import { loadBust, ROOT, W, H } from './lib/bust.mjs'
 
 // --- the app's own numbers -------------------------------------------------
 const lighting = await import('../src/render/lighting.ts')

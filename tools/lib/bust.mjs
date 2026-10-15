@@ -154,7 +154,7 @@ export async function loadBust() {
       // paints flat colour, so the flat colour has to be a plausible skin reflectance or
       // the render is comparing lighting on chalk.
       const albedo = material?.albedo ? { color: material.albedo } : {}
-      return { shading: { ...shading, materials: undefined, material }, ...albedo }
+      return { shading: { ...shading, materials: undefined, material }, zoom, ...albedo }
     }
     // Bust first (already in avatar-root space => identity object).
     drawMesh(r, { geometry: bustGeo }, identity, { yaw, color: PROBE_COLORS.bust, ...forPart('bust') })

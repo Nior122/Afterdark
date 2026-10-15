@@ -15,7 +15,10 @@
     "predev": "npm run assets && npm run env && npm run icons",
     "prebuild": "npm run assets && npm run env && npm run icons",
     "test": "node --test scripts/*.test.mjs",
-    "icons": "node scripts/gen-icons.mjs"
+    "icons": "node scripts/gen-icons.mjs",
+    "probe:geometry": "node tools/build-probe.mjs",
+    "probe:realism": "node tools/realism-probe.mjs",
+    "probe:perf": "node tools/perf-probe.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
