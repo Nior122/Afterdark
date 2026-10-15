@@ -56,8 +56,9 @@ npx wrangler pages deploy dist --project-name faceverify
 `public/_redirects` and `public/_headers` are copied into `dist/` by Vite and picked up
 automatically:
 
-* `_redirects` — SPA fallback so `/legal/privacy` and `/legal/terms` resolve on a hard
-  refresh.
+* `_redirects` — SPA fallback to `/index.html`. The legal pages are hash routes
+  (`/#/privacy`, `/#/terms`), so they survive a refresh on their own; the rewrite is there
+  for any other deep path.
 * `_headers` — `Permissions-Policy: camera=(self), microphone=(self)`, which is required for
   the camera to work at all inside a cross-origin iframe and is good hygiene otherwise.
 
@@ -128,7 +129,8 @@ gap, in the order that finds problems fastest. Do them on a real phone as well a
    it was on.
 8. **Privacy.** *Settings → Your data → Delete my avatar* — the avatar goes, the page
    returns to the default head, and IndexedDB is empty in DevTools → Application.
-9. **Legal.** /legal/privacy and /legal/terms load on a hard refresh.
+9. **Legal.** `/#/privacy` and `/#/terms` load, are readable, and the back button returns
+   to the app.
 
 ## 5. Rollback
 

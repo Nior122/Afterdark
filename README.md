@@ -11,6 +11,12 @@ Photo ──▶ on-device fit ──▶ rigged ARKit head ──▶ Manual tray 
                                                      └────── Record ◀─────┘
 ```
 
+> **Status:** everything type-checks, lints, builds and passes 28 unit tests, and every
+> asset the app requests has been fetched and verified. It has **not** been run in a browser
+> (there is none in the environment it was built in) and it is **not deployed**. The honest
+> accounting is in **[docs/FINAL-REPORT.md](docs/FINAL-REPORT.md)** — read that before
+> believing anything here.
+
 ## What is in the box
 
 | Mode | What the user gets |

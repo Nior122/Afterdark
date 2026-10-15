@@ -75,7 +75,7 @@ const results = []
 {
   // The live path filters every blendshape the tracker reports, plus the head quaternion
   // and the gaze vector — the same shape as the real per-frame work in useLiveTracking.
-  const blendshapes = ARKIT_BLENDSHAPES.map((name) => new OneEuroFilter(BLENDSHAPE_FILTER, 0))
+  const blendshapes = ARKIT_BLENDSHAPES.map(() => new OneEuroFilter(BLENDSHAPE_FILTER))
   const smoother = new QuaternionSmoother(POSE_FILTER)
   const gx = new OneEuroFilter(GAZE_FILTER)
   const gy = new OneEuroFilter(GAZE_FILTER)
@@ -132,6 +132,7 @@ for (const [name, ms, note] of results) {
   const native = ms < 0.01 ? `${(ms * 1000).toFixed(1)} µs` : `${ms.toFixed(3)} ms`
   const share = ((throttled / BUDGET_24) * 100).toFixed(2)
   console.log(`  ${name.padEnd(44)} ${native.padStart(8)}  ${throttled.toFixed(3)} ms ${share.padStart(8)}%`)
+  console.log(`      ${note}`)
   if (name.startsWith('full JS')) total = throttled
 }
 console.log('  ' + '-'.repeat(86))

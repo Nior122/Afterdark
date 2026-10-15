@@ -103,7 +103,7 @@ Realism is not free, so two things pay for it:
   light's worth of cost, not another shadow map.
 
 Measured JavaScript cost per frame (see [PERFORMANCE.md](PERFORMANCE.md)):
-**1.1 µs** for the full live-mode JS slice, i.e. ~0.007 ms at a 6× throttle.
+**~1 µs** for the full live-mode JS slice, i.e. ~0.006 ms at a 6× throttle.
 
 ## Reproducing
 

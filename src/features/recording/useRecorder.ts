@@ -44,16 +44,23 @@ const CANDIDATES = [
   'video/webm',
 ] as const
 
+/**
+ * File extension for a mime type.
+ *
+ * MP4 is the thing every messaging app will accept without a re-encode; WebM is the
+ * fallback, and anything unrecognised lands there rather than producing a file the OS
+ * cannot open at all. Exported because the download filename is the one place this can go
+ * wrong without throwing.
+ */
+export function extensionFor(mimeType: string): string {
+  return mimeType.startsWith('video/mp4') ? 'mp4' : 'webm'
+}
+
 export function pickMimeType(): { mimeType: string; extension: string } | null {
   if (typeof MediaRecorder === 'undefined') return null
   for (const candidate of CANDIDATES) {
     if (MediaRecorder.isTypeSupported(candidate)) {
-      return {
-        mimeType: candidate,
-        // MP4 is the thing every messaging app in Nigeria will accept without a
-        // re-encode; WebM needs a conversion step the user should not have to do.
-        extension: candidate.startsWith('video/mp4') ? 'mp4' : 'webm',
-      }
+      return { mimeType: candidate, extension: extensionFor(candidate) }
     }
   }
   return null

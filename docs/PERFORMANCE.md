@@ -19,12 +19,15 @@ JavaScript cost:
   work                                          native    6x CPU   share of 24 FPS frame
   --------------------------------------------------------------------------------------
   IdleAnimator.update()                          0.3 µs  0.002 ms     0.00%
-  applyManualExpression()                        1.3 µs  0.008 ms     0.02%
-  live filters (52 channels + quat + gaze)       0.9 µs  0.005 ms     0.01%
-  full JS slice of a live frame                  1.1 µs  0.007 ms     0.02%
+  applyManualExpression()                        1.2 µs  0.007 ms     0.02%
+  live filters (52 channels + quat + gaze)       0.7 µs  0.004 ms     0.01%
+  full JS slice of a live frame                  1.0 µs  0.006 ms     0.02%
   --------------------------------------------------------------------------------------
   frame budgets: 41.7 ms at 24 FPS · 16.7 ms at 60 FPS
 ```
+
+That is one representative run: the numbers move by roughly ±20% between runs, so read
+them as "about a microsecond", not as a measurement to three digits.
 
 Two caveats, both stated in the probe's own output: the "6×" column is a linear scaling, not
 real throttling, and these are desktop-CPU numbers — a mid-range Android runs
