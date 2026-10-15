@@ -1,0 +1,36 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.vercel
+.wrangler
+coverage
+.arena
+*.tsbuildinfo
+
+# --- generated and vendored runtime assets ---------------------------------
+# These are produced by `predev`/`prebuild` (npm run assets | env | icons):
+#   public/mediapipe/wasm, public/draco, public/basis  ← copied from node_modules
+#   public/hdr/studio.hdr                              ← gen-studio-env.mjs
+#   public/icons, public/favicon.svg, public/apple-touch-icon.png ← gen-icons.mjs
+# Committing them would put ~15 MB of regenerable binaries in every clone.
+public/mediapipe/wasm/
+public/draco/
+public/basis/
+public/hdr/
+public/icons/
+public/favicon.svg
+public/apple-touch-icon.png
+
+# --- binary app assets that DO belong in the repo --------------------------
+# (negated on purpose: fetch-assets.mjs verifies them by hash and cannot download
+#  them — the upstream host is not reachable from every build environment.)
+!public/models/facecap.glb
+!public/mediapipe/face_landmarker.task
+
+# --- throwaway verification output -----------------------------------------
+# tools/out holds renders from the probe tools; they are regenerated on demand.
+tools/out/

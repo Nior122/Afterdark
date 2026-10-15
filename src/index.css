@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+
+/*
+ * Faceverify styles.
+ *
+ * Tailwind v4 is configured entirely from this file — there is no tailwind.config.js.
+ * The theme block below only adds what the design actually uses: a studio palette, and
+ * the motion timings for sheets and toasts. Everything else is stock Tailwind, which
+ * keeps the utility classes in the components readable.
+ */
+
+@theme {
+  /* The studio: near-black with a cold cast, so a warm-lit face reads as the subject. */
+  --color-studio-950: #0b0d12;
+  --color-studio-900: #12151d;
+  --color-studio-800: #1b1f2a;
+  --color-studio-700: #262b39;
+
+  /* Accent, used sparingly for recording state and progress. */
+  --color-accent-500: #e2544a;
+  --color-accent-400: #f0715f;
+
+  --radius-tray: 26px;
+
+  /* Touch targets: 44px is the smallest comfortable tap on a phone. */
+  --spacing-touch: 44px;
+
+  --width-tray-panel: 168px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Base                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/* Fix the document: this is a full-screen app, not a scrolling page. Anything that
+   scrolls does so inside a sheet. */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overscroll-behavior: none;
+  background: var(--color-studio-950);
+}
+
+body {
+  /* Never let a stray drag scroll the canvas out from under the user. */
+  position: fixed;
+  inset: 0;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: #0f172a;
+}
+
+#root {
+  height: 100%;
+  /* Dynamic viewport height: 100vh on iOS Safari is taller than the visible area and
+     pushes the control tray under the browser chrome. */
+  height: 100dvh;
+}
+
+/* Buttons and sliders must not zoom on double tap, and must not show a tap flash. */
+button,
+[role='slider'],
+[role='switch'] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Draggable surfaces own the gesture completely. */
+.touch-none {
+  touch-action: none;
+}
+
+canvas {
+  display: block;
+  /* The canvas is the background; gestures on it should not scroll the page. */
+  touch-action: none;
+}
+
+/* A thin, unobtrusive scrollbar for the sheets (rarely visible on mobile). */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(100 116 139 / 0.35);
+  border-radius: 8px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Motion                                                                      */
+/* -------------------------------------------------------------------------- */
+
+@keyframes fv-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-sheet-up {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fv-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes fv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes fv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fv-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.9;
+  }
+}
+
+/* Respect the OS setting: keep the app usable, just stop animating decoration. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Safe areas                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/* Notch/home-indicator insets, as utilities so components can compose them. */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.px-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
