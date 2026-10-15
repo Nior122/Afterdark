@@ -10,9 +10,12 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { ContactShadows, Environment } from '@react-three/drei'
 import {
   ACESFilmicToneMapping,
+  CanvasTexture,
   PCFSoftShadowMap,
   SRGBColorSpace,
+  Vector3,
   type Group,
+  type Mesh,
   type PerspectiveCamera,
 } from 'three'
 import { IdleAnimator } from '../avatar/idle'
@@ -22,7 +25,14 @@ import { CHANNEL } from '../avatar/rig'
 import { applyManualExpression, manualInput, JOYSTICK_PITCH_LIMIT, JOYSTICK_YAW_LIMIT, DEG } from '../state/manualInput'
 import { useApp } from '../state/store'
 import { AdaptiveQuality, getTierSettings, type QualityTier } from './quality'
-import { EXPOSURE, ENV_INTENSITY, INTENSITY, STUDIO_COLORS, studioLightPositions } from './lighting'
+import {
+  EXPOSURE,
+  ENV_INTENSITY,
+  INTENSITY,
+  STUDIO_COLORS,
+  studioLightPositions,
+  BOUNCE,
+} from './lighting'
 import { devLog, devWarn } from '../lib/util'
 
 /** Camera framing constants, expressed in head-heights so any avatar frames the same. */
@@ -39,9 +49,19 @@ const CAMERA = {
 export interface AvatarStageProps {
   /** Called once the model is in the scene, for the boot sequence and the recorder. */
   onReady?: (canvas: HTMLCanvasElement) => void
+  /**
+   * Draw the watermark inside the scene.
+   *
+   * It is drawn as a screen-space quad in the WebGL canvas rather than composited onto
+   * the recording afterwards, because the compositing route needs to read the drawing
+   * buffer back a frame later — which is exactly what breaks when
+   * `preserveDrawingBuffer: false`. In-scene costs one textured quad and cannot be
+   * blank, and it means the capture path stays a plain `captureStream` on the canvas.
+   */
+  showWatermark?: boolean
 }
 
-export function AvatarStage({ onReady }: AvatarStageProps) {
+export function AvatarStage({ onReady, showWatermark = false }: AvatarStageProps) {
   const qualityTier = useApp((s) => s.qualityTier)
   const quality = useMemo(() => getTierSettings(qualityTier), [qualityTier])
 
@@ -58,7 +78,12 @@ export function AvatarStage({ onReady }: AvatarStageProps) {
         antialias: quality.antialias,
         alpha: false,
         powerPreference: 'high-performance',
-        // Required so we can call captureStream() on the canvas for recording.
+        // Deliberately false, and it does not break recording: captureStream() is fed
+        // by the compositor as frames are presented, so it never reads the drawing
+        // buffer back. Only toDataURL()/readPixels/drawImage-after-the-frame need
+        // preserveDrawingBuffer, and the watermark no longer uses that path (it is
+        // drawn in-scene instead). Keeping it false avoids the per-frame copy that
+        // preserveDrawingBuffer forces on several mobile GPU drivers.
         preserveDrawingBuffer: false,
       }}
       camera={{ fov: CAMERA.fov, near: CAMERA.near, far: CAMERA.far, position: [0, 0, CAMERA.distance] }}
@@ -75,6 +100,7 @@ export function AvatarStage({ onReady }: AvatarStageProps) {
       <Suspense fallback={null}>
         <AvatarModel quality={quality} />
       </Suspense>
+      <WatermarkOverlay visible={showWatermark} />
       <QualityWatchdog tier={qualityTier} />
     </Canvas>
   )
@@ -120,8 +146,30 @@ function Studio({ quality }: { quality: ReturnType<typeof getTierSettings> }) {
       {/* Rim: behind and slightly to one side, for edge separation on dark hair. */}
       <directionalLight position={positions.rim} intensity={INTENSITY.rim} color={STUDIO_COLORS.rim} />
 
-      {/* Warm low bounce, standing in for the light a body reflects back up. */}
-      <pointLight position={positions.bounce} intensity={INTENSITY.bounce} color={STUDIO_COLORS.bounce} distance={0.6} decay={2} />
+      {/* Warm low bounce, standing in for the light a body reflects back up. Decay 0 and
+          a cutoff in head heights rather than metres — see BOUNCE in lighting.ts for why a
+          point light with inverse-square falloff is the wrong model for a bounce card. */}
+      <pointLight
+        position={positions.bounce}
+        intensity={INTENSITY.bounce}
+        color={STUDIO_COLORS.bounce}
+        distance={BOUNCE.distance * HEAD_HEIGHT_METRES}
+        decay={BOUNCE.decay}
+      />
+
+      {/* Hair/back light. Reads as a separate instrument behind the head, and stops the
+          crown from merging into the dark studio. */}
+      <directionalLight position={positions.top} intensity={INTENSITY.top} color={STUDIO_COLORS.top} />
+
+      {/* Catchlight. A bounded flood from just off the lens axis — see CATCHLIGHT in
+          lighting.ts for why this is directional rather than a point light. It puts the
+          same tight specular dot in both corneas, which is the single strongest cue that
+          the eyes are wet rather than painted. */}
+      <directionalLight
+        position={positions.catchlight}
+        intensity={INTENSITY.catchlight}
+        color={STUDIO_COLORS.catchlight}
+      />
 
       {quality.environment ? (
         <Environment files="/hdr/studio.hdr" background={false} environmentIntensity={ENV_INTENSITY} />
@@ -199,6 +247,7 @@ function AvatarInstance({ asset, quality, onLoadError }: AvatarInstanceProps) {
   const groupRef = useRef<Group>(null)
   const loadedRef = useRef<LoadedAvatar | null>(null)
   const idleRef = useRef(new IdleAnimator())
+  const updateAccum = useRef(0)
   const [ready, setReady] = useState(false)
 
   // Held in refs, not read straight from the store: these two objects are written on
@@ -274,6 +323,35 @@ function AvatarInstance({ asset, quality, onLoadError }: AvatarInstanceProps) {
     if (!loaded) return
 
     const dt = Math.min(0.05, delta)
+
+    // --- frame budget telemetry -------------------------------------------
+    // Runs before the Lite gate: the watchdog needs a sample on every rendered frame,
+    // or it would conclude that a slow device is fast.
+    const frameMs = delta * 1000
+    frameTimes.current.push(frameMs)
+    if (frameTimes.current.length > 60) frameTimes.current.shift()
+
+    fpsAccum.current.frames++
+    fpsAccum.current.elapsed += frameMs
+    if (fpsAccum.current.elapsed > 1000) {
+      const fps = Math.round((fpsAccum.current.frames * 1000) / fpsAccum.current.elapsed)
+      setMeasuredFps(fps)
+      fpsAccum.current.frames = 0
+      fpsAccum.current.elapsed = 0
+    }
+
+    // --- Lite mode: update the rig at 30 Hz while still rendering ---------
+    // On a CPU-throttled phone the per-frame JavaScript (idle animator, 52-channel
+    // composition, rig matrix write) is a measurable slice of the budget. Everything
+    // the idle animator produces is below 2 Hz, and the tracker never delivers faster
+    // than 30 fps, so halving the update rate is invisible while buying back real
+    // milliseconds. Rendering itself is not skipped: the camera keeps moving smoothly.
+    if (quality.tier === 'lite') {
+      updateAccum.current += dt
+      if (updateAccum.current < 1 / 30) return
+      updateAccum.current = 0
+    }
+
     const idle = idleRef.current.update(dt)
 
     // Publish idle life so live mode can reuse it when the camera loses the face.
@@ -298,6 +376,13 @@ function AvatarInstance({ asset, quality, onLoadError }: AvatarInstanceProps) {
       faceState.expression[CHANNEL.eyeBlinkRight] = Math.max(
         faceState.expression[CHANNEL.eyeBlinkRight],
         idle.blinkRight,
+      )
+
+      // Idle brow life: a faint lift that follows the blinks and the micro-corrections.
+      // max() so a user-held expression still wins.
+      faceState.expression[CHANNEL.browInnerUp] = Math.max(
+        faceState.expression[CHANNEL.browInnerUp],
+        idle.brow,
       )
 
       // Gaze: the panel drives it, but idle saccades still ride on top when the pad
@@ -333,6 +418,16 @@ function AvatarInstance({ asset, quality, onLoadError }: AvatarInstanceProps) {
           idle.blinkRight * 0.9,
         )
       }
+
+      // Same rule for the brow: idle supplies the lift only while the tracker sees a
+      // relaxed face, which is what keeps a lost-tracking avatar from freezing into a
+      // statue without also fighting a real expression.
+      if (faceState.expression[CHANNEL.browInnerUp] < 0.05) {
+        faceState.expression[CHANNEL.browInnerUp] = Math.max(
+          faceState.expression[CHANNEL.browInnerUp],
+          idle.brow * 0.9,
+        )
+      }
     }
 
     // --- apply to the rig ---------------------------------------------------
@@ -349,19 +444,6 @@ function AvatarInstance({ asset, quality, onLoadError }: AvatarInstanceProps) {
       groupRef.current.rotation.z = Math.sin(breath * Math.PI * 2) * 0.002
     }
 
-    // --- frame budget telemetry -------------------------------------------
-    const frameMs = delta * 1000
-    frameTimes.current.push(frameMs)
-    if (frameTimes.current.length > 60) frameTimes.current.shift()
-
-    fpsAccum.current.frames++
-    fpsAccum.current.elapsed += frameMs
-    if (fpsAccum.current.elapsed > 1000) {
-      const fps = Math.round((fpsAccum.current.frames * 1000) / fpsAccum.current.elapsed)
-      setMeasuredFps(fps)
-      fpsAccum.current.frames = 0
-      fpsAccum.current.elapsed = 0
-    }
   })
 
   void ready
@@ -419,4 +501,101 @@ function QualityWatchdog({ tier }: { tier: QualityTier }) {
   })
 
   return null
+}
+
+/* -------------------------------------------------------------------------- */
+/* Watermark                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const wmForward = new Vector3()
+
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.lineTo(x + w - radius, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
+  ctx.lineTo(x + w, y + h - radius)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
+  ctx.lineTo(x + radius, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
+  ctx.lineTo(x, y + radius)
+  ctx.quadraticCurveTo(x, y, x + radius, y)
+  ctx.closePath()
+}
+
+/** The wordmark, rasterised once into a texture. */
+function makeWatermarkTexture(): CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.40)'
+    roundRectPath(ctx, 8, 26, 496, 76, 38)
+    ctx.fill()
+
+    // A violet-to-coral dot, matching the app icon, so the mark is recognisable at
+    // small sizes where the word alone is unreadable.
+    const gradient = ctx.createLinearGradient(432, 40, 476, 88)
+    gradient.addColorStop(0, 'rgba(240, 113, 95, 0.98)')
+    gradient.addColorStop(1, 'rgba(124, 58, 237, 0.98)')
+    ctx.fillStyle = gradient
+    roundRectPath(ctx, 430, 40, 46, 46, 16)
+    ctx.fill()
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+    ctx.font = '600 44px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('Faceverify', 38, 65)
+  }
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.anisotropy = 4
+  return texture
+}
+
+/**
+ * Screen-space watermark, drawn into the WebGL canvas.
+ *
+ * It is positioned in front of the camera each frame at a fixed distance, so it stays
+ * the same size and place on screen no matter how the studio camera moves, and it is
+ * depth-test-free with a high render order so nothing can occlude it.
+ */
+function WatermarkOverlay({ visible }: { visible: boolean }) {
+  const meshRef = useRef<Mesh>(null)
+  const aspect = useThree((state) => state.size.width / Math.max(1, state.size.height))
+  const texture = useMemo(() => makeWatermarkTexture(), [])
+
+  useEffect(() => () => texture.dispose(), [texture])
+
+  useFrame(({ camera }) => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    wmForward.set(0, 0, -1).applyQuaternion(camera.quaternion)
+    mesh.position.copy(camera.position).addScaledVector(wmForward, 1)
+    mesh.quaternion.copy(camera.quaternion)
+  })
+
+  if (!visible) return null
+
+  // World-space height of the frame at one unit in front of the camera, which turns the
+  // fractions below into screen fractions.
+  const frameH = 2 * Math.tan((CAMERA.fov * Math.PI) / 360)
+  const frameW = frameH * aspect
+  const planeH = frameH * 0.052
+  const planeW = planeH * 4
+  const margin = frameH * 0.028
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={[frameW / 2 - margin - planeW / 2, -frameH / 2 + margin + planeH / 2, -1]}
+      renderOrder={1000}
+      frustumCulled={false}
+    >
+      <planeGeometry args={[planeW, planeH]} />
+      <meshBasicMaterial map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
+    </mesh>
+  )
 }

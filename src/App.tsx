@@ -199,7 +199,7 @@ export function App() {
   }, [tracker.state.status, tracker.state.hasFace, tracker])
 
   /* --- recording ---------------------------------------------------------- */
-  const recorder = useRecorder({ canvas, audio: recordAudioOn, watermark })
+  const recorder = useRecorder({ canvas, audio: recordAudioOn })
 
   // Derived, not synced: the preview sheet is open whenever there is a clip the user has
   // not closed yet. No effect, and therefore no window in which the sheet is stale.
@@ -257,7 +257,9 @@ export function App() {
 
   return (
     <div data-app-shell className="relative h-full w-full overflow-hidden bg-studio-950">
-      <AvatarStage onReady={setCanvas} />
+      {/* The watermark is drawn in-scene while recording, so it lands in the captured
+          frames without any readback of the WebGL buffer. */}
+      <AvatarStage onReady={setCanvas} showWatermark={recorder.isRecording && watermark} />
 
       {/*
         One camera element, two jobs: the tracker reads frames from it, and it doubles as

@@ -7,10 +7,16 @@
  * questions that need eyes, not assertions.
  *
  * It implements just enough of a forward renderer to be legible: z-buffered
- * perspective rasterisation of indexed triangles with per-vertex normals, Lambert
- * + rim shading, optional texture sampling, and an optional morph-target blend.
+ * perspective rasterisation of indexed triangles with per-vertex normals, optional
+ * texture sampling, and an optional morph-target blend.
+ *
+ * Two shading paths exist. The default is the original single Lambert light plus a rim
+ * term. Passing `lights` switches to the multi-light physical model in `shade.mjs`,
+ * which is what the realism before/after render uses — see that file for exactly what it
+ * does and does not model.
  */
 import { encodePng } from './png.mjs'
+import { shadePhysically } from './shade.mjs'
 
 const norm = (a) => {
   const l = Math.hypot(a[0], a[1], a[2]) || 1
@@ -21,6 +27,10 @@ export class Renderer {
   constructor(width, height) {
     this.width = width
     this.height = height
+    /** Linear multiplier applied before the tone curve, mirroring ACESFilmicToneMapping. */
+    this.exposure = 1
+    /** Metres per world unit, for the physical path's point lights. */
+    this.lightScale = 1
     this.color = new Float32Array(width * height * 3)
     this.depth = new Float32Array(width * height).fill(Infinity)
     // Two-layer background: a soft vertical gradient standing in for the studio.
@@ -54,6 +64,10 @@ export class Renderer {
    * @param {number[]} [opts.influences]  matching weights, 0..1
    * @param {number[]} [opts.modelMatrix] column-major 16
    * @param {{data:Uint8Array,width:number,height:number}} [opts.texture]
+   * @param {Array} [opts.lights]        switches to the physical path; see shade.mjs
+   * @param {{color:number[],intensity:number}} [opts.ambientLight]
+   * @param {number} [opts.envIntensity]
+   * @param {object} [opts.material]     { roughness, specularIntensity, sheen, sheenColor, clearcoat, clearcoatRoughness }
    */
   draw({
     position,
@@ -74,6 +88,10 @@ export class Renderer {
     ambient = 0.28,
     rimColor = [0.55, 0.68, 0.95],
     rimStrength = 0.75,
+    lights = null,
+    ambientLight = null,
+    envIntensity = 0,
+    material = null,
   }) {
     const W = this.width
     const H = this.height
@@ -87,6 +105,9 @@ export class Renderer {
     const vertCount = position.count
     const view = new Float32Array(vertCount * 3)
     const vnorm = new Float32Array(vertCount * 3)
+    // Kept only for the physical path: point lights need the surface position, and the
+    // projected coordinates cannot be inverted reliably enough for it.
+    const wpos = lights ? new Float32Array(vertCount * 3) : null
 
     for (let i = 0; i < vertCount; i++) {
       let x = position.getX(i)
@@ -124,6 +145,12 @@ export class Renderer {
         nx = ux
         ny = uy
         nz = uz
+      }
+
+      if (wpos) {
+        wpos[i * 3] = x
+        wpos[i * 3 + 1] = y
+        wpos[i * 3 + 2] = z
       }
 
       // Perspective: depth is measured from the camera plane, so dz > 0 in front.
@@ -223,6 +250,40 @@ export class Renderer {
             b = texture.data[ti + 2] / 255
           }
 
+          if (lights) {
+            // Recover the fragment's world position from the interpolated view coords,
+            // then hand it to the physical model. Affine, like everything else here.
+            const fx = (w2 * view[ia * 3] + w1 * view[ib * 3] + w0 * view[ic * 3]) * depth * aspect / f
+            const fy = (w2 * view[ia * 3 + 1] + w1 * view[ib * 3 + 1] + w0 * view[ic * 3 + 1]) * depth / f
+            const fz = cameraDist - depth
+            let vx = -fx
+            let vy = -fy
+            let vz = cameraDist - fz
+            const vl = Math.hypot(vx, vy, vz) || 1
+            vx /= vl
+            vy /= vl
+            vz /= vl
+
+            // Point-light falloff is physical, so it needs physical distances: the
+            // caller states how many metres one of its world units is worth.
+            const toMetres = this.lightScale ?? 1
+            const shaded = shadePhysically({
+              albedo: [r, g, b],
+              normal: [nx, ny, nz],
+              viewDir: [vx, vy, vz],
+              position: [fx * toMetres, fy * toMetres, fz * toMetres],
+              lights,
+              ambientColor: ambientLight ? ambientLight.color : [0, 0, 0],
+              ambientIntensity: ambientLight ? ambientLight.intensity : 0,
+              envIntensity,
+              material: material ?? {},
+            })
+            this.color[di * 3] = shaded[0]
+            this.color[di * 3 + 1] = shaded[1]
+            this.color[di * 3 + 2] = shaded[2]
+            continue
+          }
+
           const ndl = Math.max(0, nx * light[0] + ny * light[1] + nz * light[2])
           const ndv = Math.max(0, nz) // camera looks along -Z, so ndv == nz
           const rim = Math.pow(1 - ndv, 3) * rimStrength
@@ -236,12 +297,46 @@ export class Renderer {
     }
   }
 
+  /**
+   * Copy another render's pixels into this one, at an offset.
+   *
+   * Both renders are already float buffers, so a comparison sheet does not need a PNG
+   * decoder — the probe renders each pass and blits them side by side.
+   */
+  blit(other, dx, dy) {
+    for (let y = 0; y < other.height; y++) {
+      const ty = y + dy
+      if (ty < 0 || ty >= this.height) continue
+      for (let x = 0; x < other.width; x++) {
+        const tx = x + dx
+        if (tx < 0 || tx >= this.width) continue
+        const si = (y * other.width + x) * 3
+        const ti = (ty * this.width + tx) * 3
+        this.color[ti] = other.color[si]
+        this.color[ti + 1] = other.color[si + 1]
+        this.color[ti + 2] = other.color[si + 2]
+      }
+    }
+  }
+
+  /** A vertical band of a flat colour, for the divider in a comparison sheet. */
+  fillColumn(x, width, rgb) {
+    for (let px = x; px < Math.min(this.width, x + width); px++) {
+      for (let py = 0; py < this.height; py++) {
+        const i = (py * this.width + px) * 3
+        this.color[i] = rgb[0]
+        this.color[i + 1] = rgb[1]
+        this.color[i + 2] = rgb[2]
+      }
+    }
+  }
+
   /** Simple ACES-ish tonemap + sRGB encode, then PNG. */
   toPng() {
     const out = new Uint8Array(this.width * this.height * 4)
     for (let i = 0; i < this.width * this.height; i++) {
       for (let c = 0; c < 3; c++) {
-        let v = this.color[i * 3 + c]
+        let v = this.color[i * 3 + c] * this.exposure
         v = Math.max(0, v)
         // Narkowicz ACES approximation, then gamma.
         v = (v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14)

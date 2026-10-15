@@ -28,8 +28,6 @@ export interface RecorderOptions {
   canvas: HTMLCanvasElement | null
   /** Include microphone audio. */
   audio: boolean
-  /** Optional watermark drawn into the recording. */
-  watermark?: boolean
   /** Bits per second. Scaled by resolution so Lite mode produces smaller files. */
   videoBitsPerSecond?: number
   maxDurationMs?: number
@@ -61,90 +59,6 @@ export function pickMimeType(): { mimeType: string; extension: string } | null {
   return null
 }
 
-/**
- * Build the surface the recorder captures, with the watermark baked in.
- *
- * Sized to the WebGL drawing buffer (not the CSS size), so the blit is 1:1 and no
- * scaling artefacts appear. The mark is a wordmark plus a soft plate, drawn at a size
- * derived from the frame height so it looks the same at 480p and 1080p.
- */
-function createWatermarkedSurface(source: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void } {
-  const out = document.createElement('canvas')
-  out.width = source.width || 720
-  out.height = source.height || 1280
-  const ctx = out.getContext('2d', { alpha: false })
-
-  let raf = 0
-  let running = true
-
-  const draw = () => {
-    if (!running) return
-    if (ctx) {
-      // The source may have been resized by a quality change mid-recording.
-      if (out.width !== source.width || out.height !== source.height) {
-        out.width = source.width || out.width
-        out.height = source.height || out.height
-      }
-      ctx.drawImage(source, 0, 0, out.width, out.height)
-      drawWatermark(ctx, out.width, out.height)
-    }
-    raf = requestAnimationFrame(draw)
-  }
-  raf = requestAnimationFrame(draw)
-
-  return {
-    canvas: out,
-    stop: () => {
-      running = false
-      if (raf) cancelAnimationFrame(raf)
-    },
-  }
-}
-
-function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-  const scale = Math.max(0.6, Math.min(1.6, height / 1280))
-  const fontSize = Math.round(22 * scale)
-  const pad = Math.round(14 * scale)
-  const margin = Math.round(22 * scale)
-
-  ctx.save()
-  ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
-  ctx.textBaseline = 'middle'
-  const label = watermarkLabel()
-  const textWidth = ctx.measureText(label).width
-  const plateHeight = fontSize + pad
-  const x = width - margin - textWidth - pad
-  const y = height - margin - plateHeight
-
-  // A translucent plate keeps the mark legible over both dark hair and a bright shirt.
-  ctx.fillStyle = 'rgba(2, 6, 23, 0.42)'
-  roundRect(ctx, x, y, textWidth + pad * 2, plateHeight, plateHeight / 2)
-  ctx.fill()
-
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
-  ctx.fillText(label, x + pad, y + plateHeight / 2 + 1)
-  ctx.restore()
-}
-
-/** The wordmark, in one place so it can be swapped for a brand or a user handle. */
-function watermarkLabel(): string {
-  return 'Faceverify'
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  const radius = Math.min(r, w / 2, h / 2)
-  ctx.beginPath()
-  ctx.moveTo(x + radius, y)
-  ctx.lineTo(x + w - radius, y)
-  ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
-  ctx.lineTo(x + w, y + h - radius)
-  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
-  ctx.lineTo(x + radius, y + h)
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
-  ctx.lineTo(x, y + radius)
-  ctx.quadraticCurveTo(x, y, x + radius, y)
-  ctx.closePath()
-}
 
 export interface RecorderApi {
   supported: boolean
@@ -163,7 +77,7 @@ export interface RecorderApi {
 const MAX_MS = 90_000
 
 export function useRecorder(options: RecorderOptions): RecorderApi {
-  const { canvas, audio, watermark = true, videoBitsPerSecond, maxDurationMs = MAX_MS } = options
+  const { canvas, audio, videoBitsPerSecond, maxDurationMs = MAX_MS } = options
 
   const [isRecording, setIsRecording] = useState(false)
   const [finalising, setFinalising] = useState(false)
@@ -181,8 +95,6 @@ export function useRecorder(options: RecorderOptions): RecorderApi {
   // it never changes for the life of the page, and a ref would mean reading it during
   // render to decide whether to show the record button at all.
   const [format] = useState(pickMimeType)
-  /** Present only while a watermarked recording is running. */
-  const compositorRef = useRef<{ canvas: HTMLCanvasElement; stop: () => void } | null>(null)
 
   const supported =
     format !== null && typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype
@@ -192,8 +104,6 @@ export function useRecorder(options: RecorderOptions): RecorderApi {
       window.clearInterval(tickRef.current)
       tickRef.current = null
     }
-    compositorRef.current?.stop()
-    compositorRef.current = null
     streamRef.current?.getTracks().forEach((t) => t.stop())
     audioStreamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
@@ -225,15 +135,12 @@ export function useRecorder(options: RecorderOptions): RecorderApi {
     try {
       // 30 fps is plenty for a talking head and keeps the file small.
       //
-      // With the watermark on, the captured canvas is a compositing surface: the WebGL
-      // canvas is blitted into it and the mark is drawn on top. That is the only way to
-      // bake a watermark into a single video track — MediaRecorder ignores a second
-      // video track — and it costs one 2D blit per frame, only while recording.
-      const source = watermark
-        ? createWatermarkedSurface(canvas)
-        : { canvas, stop: () => {} }
-      compositorRef.current = source
-      const canvasStream = source.canvas.captureStream(30)
+      // Straight off the renderer's own canvas. That works with
+      // `preserveDrawingBuffer: false` because captureStream() is served by the
+      // compositor as frames are presented — it never reads the drawing buffer back.
+      // The watermark, when enabled, is drawn *inside* the scene instead, so this stays
+      // a single uncontested capture with no per-frame copy.
+      const canvasStream = canvas.captureStream(30)
       streamRef.current = canvasStream
 
       const tracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()]
@@ -308,7 +215,7 @@ export function useRecorder(options: RecorderOptions): RecorderApi {
       cleanupStreams()
       setIsRecording(false)
     }
-  }, [audio, canvas, cleanupStreams, format, maxDurationMs, stop, supported, videoBitsPerSecond, watermark])
+  }, [audio, canvas, cleanupStreams, format, maxDurationMs, stop, supported, videoBitsPerSecond])
 
   const clear = useCallback(() => {
     setDurationMs(0)

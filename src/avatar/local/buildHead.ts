@@ -675,14 +675,21 @@ export function createSkinMaterial(options: SkinMaterialOptions = {}): MeshPhysi
     map: options.map ?? null,
     normalMap: options.normalMap ?? null,
     roughnessMap: options.roughnessMap ?? null,
-    roughness: 0.62,
+    // Skin is noticeably rougher than plastic but never flat: 0.55 puts the specular
+    // lobe where a forehead under a softbox actually puts it.
+    roughness: 0.55,
     metalness: 0,
-    sheen: options.lite ? 0.15 : 0.55,
-    sheenRoughness: 0.42,
-    sheenColor: new Color(0xff8f6e),
-    clearcoat: options.lite ? 0.05 : 0.16,
-    clearcoatRoughness: 0.35,
-    normalScale: new Vector2(0.55, 0.55),
+    // 1.4 is the measured IOR of human skin; the default 1.5 gives a glassier edge.
+    ior: 1.4,
+    // Dials the dielectric specular to the roughly 4% a dry stratum corneum reflects.
+    specularIntensity: 0.6,
+    sheen: options.lite ? 0.18 : 0.62,
+    sheenRoughness: 0.38,
+    // Warm, not white: the sheen lobe stands in for light scattering inside flesh.
+    sheenColor: new Color(0xff9d78),
+    clearcoat: options.lite ? 0.06 : 0.2,
+    clearcoatRoughness: 0.3,
+    normalScale: new Vector2(0.6, 0.6),
   })
   mat.name = 'skin'
 
@@ -701,7 +708,11 @@ export function createSkinMaterial(options: SkinMaterialOptions = {}): MeshPhysi
              float wrap = clamp( dot( normal, normalize( vViewPosition ) ) * 0.5 + 0.5, 0.0, 1.0 );
              float thin = pow( 1.0 - abs( dot( normal, normalize( vViewPosition ) ) ), 2.0 );
              reflectedLight.indirectDiffuse +=
-               uSubsurface * vec3( 0.92, 0.30, 0.26 ) * wrap * thin * 0.20 * diffuseColor.rgb;
+               uSubsurface * vec3( 0.94, 0.32, 0.28 ) * wrap * thin * 0.26 * diffuseColor.rgb;
+             // A little warmth survives even where the skin is flat-lit. Without this,
+             // the areas the key does not reach read as matte grey rather than as flesh.
+             reflectedLight.indirectDiffuse +=
+               uSubsurface * vec3( 0.38, 0.15, 0.13 ) * pow( wrap, 3.0 ) * 0.12 * diffuseColor.rgb;
            }`,
         )
       mat.userData.shader = shader
@@ -714,18 +725,24 @@ export function createSkinMaterial(options: SkinMaterialOptions = {}): MeshPhysi
 export function createEyeMaterial(map?: import('three').Texture | null): MeshPhysicalMaterial {
   const mat = new MeshPhysicalMaterial({
     map: map ?? null,
-    color: map ? new Color(0xffffff) : new Color(0xd8d4cd),
-    roughness: 0.08,
+    color: map ? new Color(0xffffff) : new Color(0xdedad2),
+    // The sclera itself is not the wet part: the tear film over the cornea is. A slightly
+    // rough base plus a near-mirror clearcoat reproduces that two-layer look, which a
+    // single low-roughness surface cannot (it turns the whole eyeball into a marble).
+    roughness: 0.14,
     metalness: 0,
     clearcoat: 1,
     clearcoatRoughness: 0.02,
-    ior: 1.38,
-    sheen: 0.2,
-    sheenColor: new Color(0xffffff),
+    // 1.376 is the IOR of the cornea, and it is what shapes the refracted catchlight.
+    ior: 1.376,
+    specularIntensity: 1,
+    sheen: 0.12,
+    sheenColor: new Color(0xfff3ea),
   })
   mat.name = 'eye'
-  // The corneal highlight is the strongest single cue that an eye is wet.
-  mat.envMapIntensity = 1.6
+  // The corneal highlight is the strongest single cue that an eye is wet, so the eye
+  // takes more of the environment than anything else on the head.
+  mat.envMapIntensity = 2.1
   return mat
 }
 
