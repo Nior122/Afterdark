@@ -5,13 +5,19 @@ on:
     branches: [arena/d1c199b7-faceverify]
     paths: ['.thumb-request']
 
+permissions:
+  contents: write
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Extract Telegram video thumbnail URLs for leakedvideospage/2269
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' > thumb-result.txt 2>&1
           import re, urllib.request
 
           UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
@@ -26,7 +32,6 @@ jobs:
                   req = urllib.request.Request(url, headers=UA, method="GET")
                   with urllib.request.urlopen(req, timeout=30) as r:
                       data = r.read()
-                  # Minimal JPEG dimension parser (SOF0/SOF2 markers)
                   dims = "?"
                   if data[:2] == b"\xff\xd8":
                       i = 2
@@ -64,12 +69,10 @@ jobs:
                   print("OGIMAGE", m.group(1)); candidates.append(m.group(1))
               for m in re.finditer(r'poster="([^"]+)"', html):
                   print("POSTER", m.group(1)); candidates.append(m.group(1))
-              # Thumbnail div(s): print every video_thumb background on embed/post pages.
               for m in re.finditer(r"tgme_widget_message_video_thumb[^>]*?url\(&#39;([^&]+)&#39;\)", html):
                   print("VIDEOTHUMB", m.group(1)); candidates.append(m.group(1))
               for m in re.finditer(r"tgme_widget_message_video_thumb[^>]*?url\('([^']+)'\)", html):
                   print("VIDEOTHUMB", m.group(1)); candidates.append(m.group(1))
-              # On the channel page, scope to the 2269 message block only.
               block = re.search(r'data-post="leakedvideospage/2269".*?(?=data-post="|$)', html, re.S)
               if block:
                   seg = block.group(0)
@@ -92,3 +95,12 @@ jobs:
                   seen.add(c)
                   probe(c)
           PY
+          cat thumb-result.txt
+
+      - name: Commit result back to the branch
+        run: |
+          git config user.name "thumb-scrape"
+          git config user.email "thumb-scrape@users.noreply.github.com"
+          git add thumb-result.txt
+          git commit -m "chore(temp): telegram thumbnail scrape result" || exit 0
+          git push origin HEAD:arena/d1c199b7-faceverify
