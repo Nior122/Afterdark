@@ -139,6 +139,29 @@ export function guessThumbnail(url: string): string | undefined {
   return undefined
 }
 
+/**
+ * Best-effort poster lookup for a public Telegram post. Browsers cannot read
+ * t.me pages cross-origin (no CORS headers), so this asks the Microlink
+ * metadata API for the post's Open Graph image — for video posts Telegram
+ * sets that to the actual video thumbnail served by its CDN. Returns
+ * undefined when unavailable; callers fall back to the placeholder artwork.
+ * Only the image URL is kept — nothing is downloaded or stored by the site.
+ */
+export async function fetchTelegramPoster(url: string): Promise<string | undefined> {
+  const post = telegramPost(url)
+  if (!post) return undefined
+  try {
+    const api = `https://api.microlink.io/?url=${encodeURIComponent(`https://t.me/${post.postPath}`)}`
+    const response = await fetch(api)
+    if (!response.ok) return undefined
+    const data = (await response.json()) as { data?: { image?: { url?: string } } }
+    const image = data.data?.image?.url
+    return image && /^https:\/\//i.test(image) ? image : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const UNITS = [
   { limit: 1e9, suffix: 'B' },
   { limit: 1e6, suffix: 'M' },

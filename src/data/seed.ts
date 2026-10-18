@@ -122,7 +122,8 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-telegram-twerking-aunty',
     title: 'Twerking Aunty',
-    thumbnail: asset('/thumbnails/placeholder.svg'),
+    thumbnail:
+      'https://cdn4.telesco.pe/file/cXcslCvdElEiVY8r9F7DrBSzOABHsWuTWLdv21LdXVGRG-LoQPvmAzM2IO9ef9ugkLykWQWsG0K-x-5WwR-ct2gS-75fnwmjdNT-Upz4QKweba5kyU7mh1u4LcMrxFgK55NIkf8k7wJN3PdbnhS_dJRlniPPgiTcwDgw4l4-bfmkoNsF4tMZCSloak6dFemUsXz39RQdYTOrotEgh4p7b5mRIGG-B0gCY_V4pRQsJ79rgEdaMplFMQq6gaGoHx8p3MdNC4ZegLHSahG07xobEGK_y5AkQhPlPE_mr0i366-r_VClMwo_hNLlZ4lZ2rXYip1wE65CKm0fpnIEyvNB3w',
     duration: '0:54',
     views: '686 views',
     publishedAt: '2 months ago',

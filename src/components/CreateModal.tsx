@@ -5,7 +5,7 @@ import { Check, Film, Image as ImageIcon, Link2, Loader2, Plus, X } from 'lucide
 import { AVATARS, CATEGORIES } from '../data/seed'
 import { useEscape } from '../lib/hooks'
 import { useStore } from '../lib/store'
-import { guessThumbnail, parseDuration, resolveSource } from '../lib/video'
+import { fetchTelegramPoster, guessThumbnail, parseDuration, resolveSource, telegramPost } from '../lib/video'
 
 interface CreateModalProps {
   open: boolean
@@ -25,9 +25,11 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
   const [category, setCategory] = useState<string>('POV')
   const [error, setError] = useState('')
   const [fetching, setFetching] = useState(false)
+  const [fetchedPoster, setFetchedPoster] = useState('')
 
   const source = useMemo(() => resolveSource(videoUrl), [videoUrl])
-  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || asset('/thumbnails/placeholder.svg')
+  const previewThumb =
+    thumbnail.trim() || fetchedPoster || source.poster || guessThumbnail(videoUrl) || asset('/thumbnails/placeholder.svg')
 
   useEscape(onClose, open)
 
@@ -48,8 +50,30 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
       setDuration('')
       setCategory('POV')
       setError('')
+      setFetchedPoster('')
     }
   }, [open])
+
+  /**
+   * Auto-detect the real thumbnail for public Telegram posts: when the pasted
+   * link resolves to a post, look up its poster image and use it for the
+   * preview (and therefore the saved video) unless a custom thumbnail is set.
+   */
+  const telegramPath = useMemo(() => telegramPost(videoUrl)?.postPath ?? null, [videoUrl])
+  useEffect(() => {
+    setFetchedPoster('')
+    if (!open || !telegramPath) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void fetchTelegramPoster(`https://t.me/${telegramPath}`).then((poster) => {
+        if (!cancelled && poster) setFetchedPoster(poster)
+      })
+    }, 500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [open, telegramPath])
 
   /** Best-effort title autofill for YouTube links (no key, no storage). */
   async function lookupMetadata() {

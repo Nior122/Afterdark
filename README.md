@@ -39,7 +39,9 @@ cropped out of view, an invisible shield covers that area, and a hover lock icon
 video non-clickable. Link-only catalogue imports live in `src/data/seed.ts` (`protectedEmbed: true`)
 with only the embed URL, a remote thumbnail URL and metadata (`description`, `tags`) — no video or image
 files are stored. Their raw source URL is not shown on the watch page. Public Telegram posts use the
-stable post URL and `TelegramPlayer`, never a temporary tokenised CDN MP4 URL.
+stable post URL and `TelegramPlayer`, never a temporary tokenised CDN MP4 URL. Telegram thumbnails are
+the post's actual poster images hotlinked from Telegram's CDN (still link-only, nothing stored); the
+Create dialog auto-detects the poster for newly pasted public Telegram posts.
 
 Fields: URL (required), title (required, auto-filled for YouTube links), optional thumbnail URL,
 category and optional duration (`8:31` or seconds). Everything is stored in the browser only —
