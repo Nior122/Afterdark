@@ -1,4 +1,4 @@
-export type EmbedKind = 'youtube' | 'vimeo' | 'file' | 'page' | 'none'
+export type EmbedKind = 'youtube' | 'vimeo' | 'embed' | 'file' | 'page' | 'none'
 
 export interface ResolvedSource {
   kind: EmbedKind
@@ -7,6 +7,9 @@ export interface ResolvedSource {
 }
 
 const FILE_EXT = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?.*)?$/i
+
+/** URLs that are explicitly built to be iframed, e.g. /embed/<id> or player.example.com. */
+const EMBED_PATH = /\/(?:embed|e|player)(?:\/|$)/i
 
 /** Extract a YouTube video id from any common URL shape. */
 export function youTubeId(url: string): string | null {
@@ -47,6 +50,9 @@ export function resolveSource(url?: string): ResolvedSource {
       if (id) return { kind: 'vimeo', src: `https://player.vimeo.com/video/${id}` }
     }
     if (FILE_EXT.test(u.pathname)) return { kind: 'file', src: raw }
+    if (EMBED_PATH.test(u.pathname) || host.startsWith('embed.') || host.startsWith('player.')) {
+      return { kind: 'embed', src: raw }
+    }
     return { kind: 'page', src: raw }
   } catch {
     if (FILE_EXT.test(raw)) return { kind: 'file', src: raw }

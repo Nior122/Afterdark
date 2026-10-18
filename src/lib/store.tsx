@@ -113,7 +113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         input.thumbnail?.trim() ||
         source.poster ||
         guessThumbnail(input.videoUrl) ||
-        '/thumbnails/city.jpg',
+        '/thumbnails/placeholder.svg',
       duration: input.duration?.trim() || '—',
       views: '0 views',
       publishedAt: 'Just now',

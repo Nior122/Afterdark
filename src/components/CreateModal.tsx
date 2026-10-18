@@ -26,7 +26,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
   const [fetching, setFetching] = useState(false)
 
   const source = useMemo(() => resolveSource(videoUrl), [videoUrl])
-  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || '/thumbnails/city.jpg'
+  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || '/thumbnails/placeholder.svg'
 
   useEscape(onClose, open)
 
@@ -163,9 +163,11 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                     ? 'Vimeo link detected'
                     : source.kind === 'file'
                       ? 'Direct video file detected'
-                      : source.kind === 'page'
-                        ? 'External page link'
-                        : 'Waiting for a link…'}
+                      : source.kind === 'embed'
+                        ? 'Embeddable player detected'
+                        : source.kind === 'page'
+                          ? 'External page link'
+                          : 'Waiting for a link…'}
               </p>
             </div>
           </div>
@@ -191,7 +193,8 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                 className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
               <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-                YouTube, Vimeo and direct MP4/WebM links play inline. Other pages open in a new tab.
+                YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
+                play inline in a sandboxed player. Other pages only show a preview.
               </p>
             </div>
 

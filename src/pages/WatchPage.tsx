@@ -189,6 +189,18 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
             />
           )}
 
+          {source.kind === 'embed' && (
+            <iframe
+              src={source.src}
+              title={video.title}
+              className="absolute inset-0 h-full w-full"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              referrerPolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-presentation"
+              allowFullScreen
+            />
+          )}
+
           {source.kind === 'file' && (
             <video
               src={source.src}
