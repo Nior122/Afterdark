@@ -143,3 +143,9 @@ npm run preview        # serve dist/ at http://localhost:4173
 - Clean production build (Vite 6, ~90 kB gzipped main chunk, React split into its own chunk).
 - Works from the domain root **and** from a sub-path (relative `base`, hashed asset URLs).
 - `npm run preview` verified: images, fonts, hash routing and deep links all load with zero console errors.
+
+## Changelog
+
+- `0c3834b` deployment config for GitHub Pages / Vercel / Netlify.
+- `d766358` sandboxed generic embed players + branded placeholder poster.
+- `875ac5e` initial GridWatch build: home feed, watch page, create-by-URL, search, library.
