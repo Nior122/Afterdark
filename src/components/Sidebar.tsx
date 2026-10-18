@@ -2,22 +2,25 @@ import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import {
   AudioLines,
+  Camera,
   ChevronDown,
   ChevronRight,
   Clock,
-  Clapperboard,
   Compass,
+  Crown,
+  Eye,
+  Flame,
   Folder,
-  Gamepad2,
+  Globe,
+  Heart,
   History,
   Home,
   ListVideo,
-  Music,
-  Newspaper,
+  Sparkles,
   TrendingUp,
-  Trophy,
+  Zap,
 } from 'lucide-react'
-import { ALL_CHANNEL_MAP } from '../data/seed'
+import { ALL_CHANNEL_MAP, browsePath } from '../data/seed'
 import { useStore } from '../lib/store'
 
 interface SidebarProps {
@@ -35,11 +38,14 @@ const MAIN_LINKS = [
 ]
 
 const CATEGORY_LINKS = [
-  { to: '/browse/Movies', label: 'Movies', icon: Clapperboard },
-  { to: '/browse/Music', label: 'Music', icon: Music },
-  { to: '/browse/Gaming', label: 'Gaming', icon: Gamepad2 },
-  { to: '/browse/News', label: 'News', icon: Newspaper },
-  { to: '/browse/Sports', label: 'Sports', icon: Trophy },
+  { category: 'POV', icon: Eye },
+  { category: 'Amateur', icon: Camera },
+  { category: 'MILF', icon: Crown },
+  { category: 'Blowjob', icon: Heart },
+  { category: 'Big Tits', icon: Sparkles },
+  { category: 'Big Ass', icon: Flame },
+  { category: 'Latina', icon: Globe },
+  { category: 'Hardcore', icon: Zap },
 ]
 
 const MORE_LINKS = [
@@ -104,9 +110,17 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
         <hr className="mx-1 my-3 border-[#ececee]" />
 
+        <p className="px-3 pb-1 pt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
+          Categories
+        </p>
         <nav className="flex flex-col gap-0.5">
-          {CATEGORY_LINKS.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} onClick={onClose} className={({ isActive }) => itemClasses(isActive)}>
+          {CATEGORY_LINKS.map(({ category, icon: Icon }) => (
+            <NavLink
+              key={category}
+              to={browsePath(category)}
+              onClick={onClose}
+              className={({ isActive }) => itemClasses(isActive)}
+            >
               {({ isActive }) => (
                 <>
                   <Icon
@@ -114,7 +128,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                     strokeWidth={isActive ? 2.1 : 1.8}
                     className={isActive ? 'text-brand-600' : 'text-[#262626]'}
                   />
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  <span className="min-w-0 flex-1 truncate">{category}</span>
                 </>
               )}
             </NavLink>
@@ -170,7 +184,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
             >
               <img src={channel.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
               <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-              {channel.id === 'techbit' && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-600" />}
+              {channel.id === 'pov-central' && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-600" />}
             </Link>
           ))}
           {subscribedChannels.length === 0 && (
@@ -197,13 +211,11 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
         <div className="mt-5 border-t border-[#ececee] px-3 pt-4">
           <p className="text-[11px] leading-[1.9] text-[#909090]">
-            About · Press · Copyright · Contact
+            18+ only · Terms · Privacy · DMCA
             <br />
-            Creators · Advertise · Developers
+            Content removal · Contact
             <br />
-            Terms · Privacy · Policy &amp; Safety
-            <br />
-            <span className="mt-2 inline-block text-[11px] text-[#a3a3a3]">© 2026 GridWatch</span>
+            <span className="mt-2 inline-block text-[11px] text-[#a3a3a3]">© 2026 AfterDark</span>
           </p>
         </div>
       </aside>

@@ -24,7 +24,7 @@ export function useClickOutside<T extends HTMLElement>(
 export function usePageTitle(title: string) {
   useEffect(() => {
     const previous = document.title
-    document.title = title ? `${title} · GridWatch` : 'GridWatch'
+    document.title = title ? `${title} · AfterDark` : 'AfterDark — Adult Videos (18+)'
     return () => {
       document.title = previous
     }

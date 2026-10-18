@@ -21,9 +21,9 @@ interface HeaderProps {
 }
 
 const NOTIFICATIONS = [
-  { id: 1, avatar: asset("/avatars/chillwave.svg"), text: 'ChillWave uploaded “Inside the Neon Tour”', time: '2h ago' },
-  { id: 2, avatar: asset("/avatars/techbit.svg"), text: 'TechBit is live: Building a silent PC', time: '5h ago' },
-  { id: 3, avatar: asset("/avatars/newsnow.jpg"), text: 'NewsNow posted a new morning brief', time: '8h ago' },
+  { id: 1, avatar: asset("/avatars/pulse.svg"), text: 'POV Central uploaded “POV MILF Slut With Huge Watermelons Takes On A Huge Cock [Kat Mar10]”', time: '2h ago' },
+  { id: 2, avatar: asset("/avatars/pulse.svg"), text: 'POV Central uploaded “Tatum Christine - Sister Wants Step Brothers Cock”', time: '5h ago' },
+  { id: 3, avatar: asset("/avatars/pulse.svg"), text: 'POV Central uploaded “!! Risky Proposition!! Innocent Hooters Waitress Reveals Her Dirtiest Secrets”', time: '8h ago' },
 ]
 
 export default function Header({ onCreate, onToggleSidebar }: HeaderProps) {
@@ -68,7 +68,7 @@ export default function Header({ onCreate, onToggleSidebar }: HeaderProps) {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search videos, channels, or topics..."
+              placeholder="Search videos, pornstars, categories..."
               aria-label="Search"
               className="h-full min-w-0 flex-1 bg-transparent pr-2 text-[15px] text-ink placeholder:text-[#8f8f97]"
             />
@@ -104,7 +104,7 @@ export default function Header({ onCreate, onToggleSidebar }: HeaderProps) {
         <button
           type="button"
           onClick={onCreate}
-          className="flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-3.5 text-[14px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(109,40,217,0.9)] transition hover:brightness-105 active:scale-[0.98] sm:px-4"
+          className="flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-3.5 text-[14px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(190,18,60,0.9)] transition hover:brightness-105 active:scale-[0.98] sm:px-4"
         >
           <Plus size={19} strokeWidth={2.4} />
           <span className="hidden sm:inline">Create</span>
@@ -176,7 +176,7 @@ export default function Header({ onCreate, onToggleSidebar }: HeaderProps) {
                 <img src={AVATARS.user} alt="" className="h-11 w-11 rounded-full object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-[15px] font-semibold">Alex Rivera</p>
-                  <p className="truncate text-[13px] text-muted">alex@gridwatch.tv</p>
+                  <p className="truncate text-[13px] text-muted">alex@afterdark.tv</p>
                 </div>
               </div>
               <div className="py-1.5">

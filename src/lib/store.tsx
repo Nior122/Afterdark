@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  ALL_CHANNELS,
+  CATEGORIES,
   RECOMMENDED_ADS,
   SEED_VIDEOS,
   TRENDING_ADS,
@@ -24,6 +26,9 @@ export interface NewVideoInput {
   category: string
   duration?: string
   thumbnail?: string
+  description?: string
+  tags?: string[]
+  protectedEmbed?: boolean
 }
 
 export interface HistoryEntry {
@@ -59,13 +64,9 @@ const STORAGE_KEY = 'gridwatch.store.v1'
 const DEFAULT_STATE: PersistedState = {
   userVideos: [],
   watchLater: SEED_VIDEOS.map((v) => v.id),
-  liked: ['v-concert', 'v-lofi', 'v-match'],
-  history: [
-    { id: 'v-nebula', at: Date.now() - 1000 * 60 * 60 * 5 },
-    { id: 'v-game-meta', at: Date.now() - 1000 * 60 * 60 * 26 },
-    { id: 'v-city-doc', at: Date.now() - 1000 * 60 * 60 * 72 },
-  ],
-  subscriptions: ['techbit', 'cinemasphere', 'gameplay', 'newsnow'],
+  liked: [],
+  history: [],
+  subscriptions: ['pov-central'],
 }
 
 function loadState(): PersistedState {
@@ -74,14 +75,41 @@ function loadState(): PersistedState {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_STATE
     const parsed = JSON.parse(raw) as Partial<PersistedState>
+    // Normalise videos saved before the adult rebrand: any category outside
+    // the current adult taxonomy is moved to POV so an obsolete label cannot
+    // resurface from localStorage.
+    const adultCategories = new Set<string>(CATEGORIES.filter((category) => category !== 'All'))
+    const userVideos = (Array.isArray(parsed.userVideos) ? parsed.userVideos : []).map((video) => ({
+      ...video,
+      category: adultCategories.has(video.category) ? video.category : 'POV',
+    }))
+    // Drop saved/liked/history references to videos that no longer exist
+    // (e.g. catalogue entries removed from seed.ts), so returning browsers
+    // do not keep ghost counts or broken collections.
+    const validVideoIds = new Set(
+      [...SEED_VIDEOS, ...RECOMMENDED_ADS, ...TRENDING_ADS, ...userVideos].map((v) => v.id),
+    )
+    const validChannelIds = new Set(ALL_CHANNELS.map((channel) => channel.id))
+    const savedSubscriptions = Array.isArray(parsed.subscriptions)
+      ? parsed.subscriptions.filter((id) => validChannelIds.has(id))
+      : undefined
     return {
-      userVideos: Array.isArray(parsed.userVideos) ? parsed.userVideos : [],
-      watchLater: Array.isArray(parsed.watchLater) ? parsed.watchLater : DEFAULT_STATE.watchLater,
-      liked: Array.isArray(parsed.liked) ? parsed.liked : DEFAULT_STATE.liked,
-      history: Array.isArray(parsed.history) ? parsed.history : DEFAULT_STATE.history,
-      subscriptions: Array.isArray(parsed.subscriptions)
-        ? parsed.subscriptions
-        : DEFAULT_STATE.subscriptions,
+      userVideos,
+      watchLater: Array.isArray(parsed.watchLater)
+        ? parsed.watchLater.filter((id) => validVideoIds.has(id))
+        : DEFAULT_STATE.watchLater,
+      liked: Array.isArray(parsed.liked)
+        ? parsed.liked.filter((id) => validVideoIds.has(id))
+        : DEFAULT_STATE.liked,
+      history: Array.isArray(parsed.history)
+        ? parsed.history.filter((entry) => entry && validVideoIds.has(entry.id))
+        : DEFAULT_STATE.history,
+      subscriptions:
+        savedSubscriptions && savedSubscriptions.length > 0
+          ? savedSubscriptions
+          : Array.isArray(parsed.subscriptions) && parsed.subscriptions.length === 0
+            ? []
+            : DEFAULT_STATE.subscriptions,
     }
   } catch {
     return DEFAULT_STATE
@@ -120,6 +148,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       publishedAt: 'Just now',
       channelId: input.channelId,
       category: input.category,
+      description: input.description?.trim() || undefined,
+      tags: input.tags?.map((tag) => tag.trim()).filter(Boolean),
+      // Generic and Telegram embeds are click-shielded by default so their
+      // internal title/logo links cannot take viewers off AfterDark.
+      protectedEmbed:
+        input.protectedEmbed ?? (source.kind === 'embed' || source.kind === 'telegram'),
     }
     setState((prev) => ({ ...prev, userVideos: [video, ...prev.userVideos] }))
     return video

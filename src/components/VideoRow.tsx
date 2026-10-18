@@ -29,6 +29,7 @@ export default function VideoRow({ video, description, compact = false }: VideoR
           src={video.thumbnail}
           alt={video.title}
           loading="lazy"
+          referrerPolicy="no-referrer"
           className="h-full w-full object-cover transition duration-500 group-hover/row:scale-[1.03]"
         />
         {isAd && (

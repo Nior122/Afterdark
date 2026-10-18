@@ -18,6 +18,16 @@ export interface Video {
   category: string
   /** Raw URL supplied by the user. Empty for seeded/demo videos. */
   videoUrl?: string
+  /** Site-side description. Link-only imports whose source has none say so here. */
+  description?: string
+  /** Searchable tags/keywords, rendered as chips on the watch page. */
+  tags?: string[]
+  /**
+   * Render the embed behind a click shield (poster facade + shielded
+   * title-bar link + sandbox without top-navigation/popups) and hide the
+   * raw source URL, so viewers cannot click through to the original site.
+   */
+  protectedEmbed?: boolean
   isAd?: boolean
   adHeadline?: string
 }
@@ -30,24 +40,11 @@ export interface Ad extends Video {
 }
 
 export const AVATARS = {
-  techbit: asset("/avatars/techbit.svg"),
-  cinemasphere: asset("/avatars/cinemasphere.jpg"),
-  gameplay: asset("/avatars/gameplay.svg"),
-  newsnow: asset("/avatars/newsnow.jpg"),
-  sportscentral: asset("/avatars/sportscentral.svg"),
-  cinemax: asset("/avatars/cinemax.jpg"),
-  chillwave: asset("/avatars/chillwave.svg"),
   user: asset("/avatars/user.jpg"),
 } as const
 
 export const CHANNELS: Channel[] = [
-  { id: 'techbit', name: 'TechBit', avatar: AVATARS.techbit, verified: true, subscribers: '2.4M' },
-  { id: 'cinemasphere', name: 'CinemaSphere', avatar: AVATARS.cinemasphere, verified: true, subscribers: '1.8M' },
-  { id: 'gameplay', name: 'GamePlay', avatar: AVATARS.gameplay, verified: true, subscribers: '3.1M' },
-  { id: 'newsnow', name: 'NewsNow', avatar: AVATARS.newsnow, verified: true, subscribers: '5.2M' },
-  { id: 'sportscentral', name: 'SportsCentral', avatar: AVATARS.sportscentral, verified: true, subscribers: '1.2M' },
-  { id: 'cinemax', name: 'CineMax', avatar: AVATARS.cinemax, verified: true, subscribers: '980K' },
-  { id: 'chillwave', name: 'ChillWave', avatar: AVATARS.chillwave, verified: true, subscribers: '4.6M' },
+  { id: 'pov-central', name: 'POV Central', avatar: asset("/avatars/pulse.svg"), verified: true, subscribers: '8.4K' },
   { id: 'you', name: 'You', avatar: AVATARS.user, verified: false, subscribers: '0' },
 ]
 
@@ -55,273 +52,193 @@ export const CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
   CHANNELS.map((c) => [c.id, c]),
 )
 
-export const ADVERTISERS: Channel[] = [
-  { id: 'ad-nova', name: 'Nova Bank', avatar: asset("/avatars/nova.svg"), verified: true, subscribers: '' },
-  { id: 'ad-vista', name: 'Vista Travel', avatar: asset("/avatars/vista.svg"), verified: true, subscribers: '' },
-  { id: 'ad-pulse', name: 'Pulse Gaming', avatar: asset("/avatars/pulse.svg"), verified: true, subscribers: '' },
-  { id: 'ad-meridian', name: 'Meridian News', avatar: asset("/avatars/meridian.svg"), verified: true, subscribers: '' },
-  { id: 'ad-strike', name: 'Strike Football', avatar: asset("/avatars/strike.svg"), verified: true, subscribers: '' },
-  { id: 'ad-cinemax', name: 'CineMax+', avatar: AVATARS.cinemax, verified: true, subscribers: '' },
-  { id: 'ad-sonic', name: 'Sonic Music', avatar: asset("/avatars/sonic.svg"), verified: true, subscribers: '' },
-  { id: 'ad-northvolt', name: 'NorthVolt', avatar: asset("/avatars/northvolt.svg"), verified: true, subscribers: '' },
-]
+/** No sponsor/advertiser channels on this adult catalogue. */
+export const ADVERTISERS: Channel[] = []
 
 export const ALL_CHANNELS: Channel[] = [...CHANNELS, ...ADVERTISERS]
 export const ALL_CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
   ALL_CHANNELS.map((c) => [c.id, c]),
 )
 
+/** Adult-site category taxonomy. `All` is the home feed, not a video category. */
 export const CATEGORIES = [
   'All',
-  'Tech',
-  'Gaming',
-  'Entertainment',
-  'Music',
-  'News',
-  'Sports',
-  'Movies',
-  'How-To',
+  'POV',
+  'Amateur',
+  'MILF',
+  'Blowjob',
+  'Big Tits',
+  'Big Ass',
+  'Latina',
+  'Brunette',
+  'Pornstar',
+  'Hardcore',
+  'Anal',
+  'Homemade',
+  'Mature',
+  'Big Dick',
+  'Cumshot',
+  'Creampie',
+  'Threesome',
+  'Lesbian',
+  'Ebony',
+  'Interracial',
+  'Hotwife',
+  'Webcam',
+  'ASMR',
+  'Toys',
+  '4K Ultra HD',
 ] as const
 
-/** Ads shown in the first row ("Recommended for you"). */
-export const RECOMMENDED_ADS: Ad[] = [
-  {
-    id: 'ad-rec-1',
-    sponsor: 'Ad',
-    advertiser: 'Nova Bank',
-    adHeadline: '',
-    title: 'The Future of Smart Cities',
-    thumbnail: asset("/thumbnails/city.jpg"),
-    duration: '2:45',
-    views: '128K views',
-    publishedAt: '2 days ago',
-    channelId: 'techbit',
-    category: 'Tech',
-    isAd: true,
-  },
-  {
-    id: 'ad-rec-2',
-    sponsor: 'Ad · Get 20% off on annual plans',
-    advertiser: 'Vista Travel',
-    adHeadline: 'Get 20% off on annual plans',
-    title: "Exploring the World's Most Beautiful Places",
-    thumbnail: asset("/thumbnails/mountains.jpg"),
-    duration: '10:12',
-    views: '245K views',
-    publishedAt: '1 week ago',
-    channelId: 'cinemasphere',
-    category: 'Entertainment',
-    isAd: true,
-  },
-  {
-    id: 'ad-rec-3',
-    sponsor: 'Ad',
-    advertiser: 'Pulse Gaming',
-    adHeadline: 'New loot, new season. Play now!',
-    title: 'Cyber Arena – Season 7 Gameplay',
-    thumbnail: asset("/thumbnails/gaming.jpg"),
-    duration: '8:31',
-    views: '89K views',
-    publishedAt: '3 days ago',
-    channelId: 'gameplay',
-    category: 'Gaming',
-    isAd: true,
-  },
-  {
-    id: 'ad-rec-4',
-    sponsor: 'Ad',
-    advertiser: 'Meridian News',
-    adHeadline: 'Stay informed. Get the full story.',
-    title: 'Top Headlines: Global Markets Update',
-    thumbnail: asset("/thumbnails/news.jpg"),
-    duration: '5:27',
-    views: '76K views',
-    publishedAt: '8 hours ago',
-    channelId: 'newsnow',
-    category: 'News',
-    isAd: true,
-  },
-]
+/** Encoded browse route for a category, including names with spaces. */
+export function browsePath(category: string): string {
+  return category === 'All' ? '/' : `/browse/${encodeURIComponent(category)}`
+}
 
-/** Ads shown in the "Trending now" row. */
-export const TRENDING_ADS: Ad[] = [
-  {
-    id: 'ad-trend-1',
-    sponsor: 'Ad',
-    advertiser: 'Strike Football',
-    adHeadline: 'Built for champions.',
-    title: 'Top 10 Soccer Goals This Week',
-    thumbnail: asset("/thumbnails/soccer.jpg"),
-    duration: '3:15',
-    views: '312K views',
-    publishedAt: '1 day ago',
-    channelId: 'sportscentral',
-    category: 'Sports',
-    isAd: true,
-  },
-  {
-    id: 'ad-trend-2',
-    sponsor: 'Ad',
-    advertiser: 'CineMax+',
-    adHeadline: 'Now streaming. Only on CineMax',
-    title: 'Shadow Protocol – Official Trailer',
-    thumbnail: asset("/thumbnails/hooded.jpg"),
-    duration: '12:45',
-    views: '1.2M views',
-    publishedAt: '4 days ago',
-    channelId: 'cinemax',
-    category: 'Movies',
-    isAd: true,
-  },
-  {
-    id: 'ad-trend-3',
-    sponsor: 'Ad',
-    advertiser: 'Sonic Music',
-    adHeadline: 'Millions of songs. One app.',
-    title: 'Lo-Fi Beats to Study / Relax To',
-    thumbnail: asset("/thumbnails/waveform.jpg"),
-    duration: '1:02:34',
-    views: '530K views',
-    publishedAt: '6 days ago',
-    channelId: 'chillwave',
-    category: 'Music',
-    isAd: true,
-  },
-  {
-    id: 'ad-trend-4',
-    sponsor: 'Ad',
-    advertiser: 'NorthVolt',
-    adHeadline: 'Upgrade your tech. Save more.',
-    title: 'How to Build Your First PC – Step by Step',
-    thumbnail: asset("/thumbnails/tech.jpg"),
-    duration: '6:48',
-    views: '97K views',
-    publishedAt: '5 days ago',
-    channelId: 'techbit',
-    category: 'How-To',
-    isAd: true,
-  },
-]
+/**
+ * A video belongs to a browse category when its primary category matches,
+ * or when one of its source categories/tags matches. This lets the single
+ * `POV` catalogue videos also appear under e.g. MILF, Latina or Blowjob.
+ */
+export function videoMatchesCategory(
+  video: Pick<Video, 'category' | 'tags'>,
+  category: string,
+): boolean {
+  const needle = category.trim().toLowerCase()
+  if (!needle || needle === 'all') return true
+  return (
+    video.category.toLowerCase() === needle ||
+    (video.tags?.some((tag) => tag.trim().toLowerCase() === needle) ?? false)
+  )
+}
+
+/** No ad/demo videos: the catalogue contains only the curated videos below. */
+export const RECOMMENDED_ADS: Ad[] = []
+
+export const TRENDING_ADS: Ad[] = []
 
 export const SEED_VIDEOS: Video[] = [
+  // --- Link-only imports (embed URL + remote thumbnail + metadata only, no files stored) ---
   {
-    id: 'v-concert',
-    title: 'Inside the Neon Tour: Night Two Highlights',
-    thumbnail: asset("/thumbnails/concert.jpg"),
-    duration: '14:02',
-    views: '842K views',
-    publishedAt: '2 days ago',
-    channelId: 'chillwave',
-    category: 'Music',
+    id: 'v-telegram-twerking-aunty',
+    title: 'Twerking Aunty',
+    thumbnail: asset('/thumbnails/placeholder.svg'),
+    duration: '0:54',
+    views: '686 views',
+    publishedAt: '2 months ago',
+    channelId: 'you',
+    category: 'Homemade',
+    videoUrl: 'https://t.me/leakedvideospage/2269',
+    description: 'Homemade · 0:54.',
+    tags: ['Homemade', 'Twerking', 'Aunty', 'Telegram'],
+    protectedEmbed: true,
   },
   {
-    id: 'v-nebula',
-    title: 'What the New Telescope Found in the Carina Nebula',
-    thumbnail: asset("/thumbnails/nebula.jpg"),
-    duration: '18:27',
-    views: '1.4M views',
-    publishedAt: '1 week ago',
-    channelId: 'techbit',
-    category: 'Tech',
+    id: 'v-pov-tatum-christine',
+    title: 'Tatum Christine - Sister Wants Step Brothers Cock',
+    thumbnail: 'https://static-ca-cdn.eporner.com/thumbs/static4/1/17/179/17960055/3_240.jpg',
+    duration: '30:10',
+    views: '31.9K views',
+    publishedAt: '2 months ago',
+    channelId: 'pov-central',
+    category: 'POV',
+    videoUrl: 'https://www.eporner.com/embed/f2gVZh1XTVr/',
+    description:
+      'POV · 30:10 · 1080p@60fps.\n\nNo description was provided by the source for this video, so this listing was created from its title, length, categories and tags.\n\nCategories: Amateur, Blowjob, Homemade, Toys, ASMR, POV, Brunette, HD Porn 1080p, 60 FPS.',
+    tags: [
+      'POV',
+      'Amateur',
+      'Blowjob',
+      'Homemade',
+      'Toys',
+      'ASMR',
+      'Brunette',
+      'HD Porn 1080p',
+      '60 FPS',
+      'Tatum Christine',
+      'Step sister sex',
+      'Step sister fuck',
+      'Hentai step sister',
+      'Hot step sister',
+      'Step sister anal',
+      'Nude step sister',
+      'Step sister blowjob',
+      'Step brothers',
+      'Long hair',
+    ],
+    protectedEmbed: true,
   },
   {
-    id: 'v-cooking',
-    title: 'Restaurant Secrets: The Perfect Flambé Pasta',
-    thumbnail: asset("/thumbnails/cooking.jpg"),
-    duration: '11:36',
-    views: '226K views',
-    publishedAt: '3 days ago',
-    channelId: 'cinemasphere',
-    category: 'How-To',
+    id: 'v-pov-risky-proposition',
+    title: '!! Risky Proposition!! Innocent Hooters Waitress Reveals Her Dirtiest Secrets - Barbie Hard Peru',
+    thumbnail: 'https://static-ca-cdn.eporner.com/thumbs/static4/1/16/164/16427995/15_240.jpg',
+    duration: '19:33',
+    views: '443K views',
+    publishedAt: '7 months ago',
+    channelId: 'pov-central',
+    category: 'POV',
+    videoUrl: 'https://www.eporner.com/embed/7ds0OE7OiYv/',
+    description:
+      'POV · 19:33 · 2160p (4K).\n\nListed by the source as starring: Barbie Hard Peru, Mariah Milano, Sarah Lollypop, Abby Adams.\n\nNo description was provided by the source for this video, so this listing was created from its title, length, categories and tags.\n\nCategories: Cumshot, Big Dick, Big Tits, POV, Brunette, Big Ass, Latina, Pornstar, 4K Ultra HD.',
+    tags: [
+      'POV',
+      'Cumshot',
+      'Big Dick',
+      'Big Tits',
+      'Brunette',
+      'Big Ass',
+      'Latina',
+      'Pornstar',
+      '4K Ultra HD',
+      'Barbie Hard Peru',
+      'Mariah Milano',
+      'Sarah Lollypop',
+      'Abby Adams',
+      'Fuck her hard',
+      'Her',
+      'Hard',
+      'Fucking her hard',
+      'Barbie',
+      'Hooters',
+      'Waitress',
+      'Innocent',
+      'Hclips',
+    ],
+    protectedEmbed: true,
   },
   {
-    id: 'v-supercar',
-    title: 'Pushing the New Roadster Down the Pacific Coast',
-    thumbnail: asset("/thumbnails/supercar.jpg"),
-    duration: '9:54',
-    views: '604K views',
+    id: 'v-pov-kat-mar10',
+    title: 'POV MILF Slut With Huge Watermelons Takes On A Huge Cock [Kat Mar10]',
+    thumbnail: 'https://static-ca-cdn.eporner.com/thumbs/static4/1/18/186/18662143/9_240.jpg',
+    duration: '30:59',
+    views: '7.5K views',
     publishedAt: '5 days ago',
-    channelId: 'sportscentral',
-    category: 'Sports',
-  },
-  {
-    id: 'v-city-doc',
-    title: 'How Cities Learned to Think: Urban Tech Explained',
-    thumbnail: asset("/thumbnails/city.jpg"),
-    duration: '22:08',
-    views: '318K views',
-    publishedAt: '2 weeks ago',
-    channelId: 'techbit',
-    category: 'Tech',
-  },
-  {
-    id: 'v-lake',
-    title: 'A Week Alone in the Rockies (4K Cinematic)',
-    thumbnail: asset("/thumbnails/mountains.jpg"),
-    duration: '21:15',
-    views: '1.1M views',
-    publishedAt: '1 month ago',
-    channelId: 'cinemasphere',
-    category: 'Entertainment',
-  },
-  {
-    id: 'v-cinema',
-    title: 'The Making of a Cinema Classic: Restored in 4K',
-    thumbnail: asset("/thumbnails/hooded.jpg"),
-    duration: '16:41',
-    views: '487K views',
-    publishedAt: '6 days ago',
-    channelId: 'cinemax',
-    category: 'Movies',
-  },
-  {
-    id: 'v-news-brief',
-    title: 'Morning Brief: What You Missed Overnight',
-    thumbnail: asset("/thumbnails/news.jpg"),
-    duration: '7:12',
-    views: '410K views',
-    publishedAt: '5 hours ago',
-    channelId: 'newsnow',
-    category: 'News',
-  },
-  {
-    id: 'v-game-meta',
-    title: 'The New Meta: 10 Loadouts That Actually Work',
-    thumbnail: asset("/thumbnails/gaming.jpg"),
-    duration: '13:29',
-    views: '2.3M views',
-    publishedAt: '4 days ago',
-    channelId: 'gameplay',
-    category: 'Gaming',
-  },
-  {
-    id: 'v-match',
-    title: 'Full Match Recap: The Comeback of the Season',
-    thumbnail: asset("/thumbnails/soccer.jpg"),
-    duration: '19:47',
-    views: '3.6M views',
-    publishedAt: '1 day ago',
-    channelId: 'sportscentral',
-    category: 'Sports',
-  },
-  {
-    id: 'v-lofi',
-    title: 'Late Night Session – Deep Focus Mix',
-    thumbnail: asset("/thumbnails/waveform.jpg"),
-    duration: '58:19',
-    views: '2.9M views',
-    publishedAt: '3 weeks ago',
-    channelId: 'chillwave',
-    category: 'Music',
-  },
-  {
-    id: 'v-pc-build',
-    title: 'Build a Silent 4K Editing Rig for Under $900',
-    thumbnail: asset("/thumbnails/tech.jpg"),
-    duration: '24:03',
-    views: '156K views',
-    publishedAt: '2 days ago',
-    channelId: 'techbit',
-    category: 'How-To',
+    channelId: 'pov-central',
+    category: 'POV',
+    videoUrl: 'https://www.eporner.com/embed/xnMiRJxFbXE/',
+    description:
+      'POV · 30:59 · 1440p (2K).\n\nNo description was provided by the source for this video, so this listing was created from its title, length, categories and tags.\n\nCategories: Blowjob, Homemade, Mature, Housewives, Big Tits, POV, Brunette, Big Ass, MILF, 4K Ultra HD, Hotwife.',
+    tags: [
+      'POV',
+      'Blowjob',
+      'Homemade',
+      'Mature',
+      'Housewives',
+      'Big Tits',
+      'Brunette',
+      'Big Ass',
+      'MILF',
+      '4K Ultra HD',
+      'Hotwife',
+      'Kat Mar10',
+      'Pov milf',
+      'Huge tits milf',
+      'Huge cock',
+      'Milf slut',
+      'Huge black cock',
+      'Milf pov blowjob',
+      'Huge white cock',
+    ],
+    protectedEmbed: true,
   },
 ]

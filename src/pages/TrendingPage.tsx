@@ -22,7 +22,7 @@ export default function TrendingPage() {
     <>
       <PageHeading
         title="Trending"
-        subtitle="The videos everyone on GridWatch is watching right now."
+        subtitle="The adult videos everyone is watching right now."
         action={
           <span className="flex h-9 items-center gap-2 rounded-full bg-brand-100 px-3.5 text-[12.5px] font-semibold text-brand-700">
             <Flame size={16} /> Updated hourly

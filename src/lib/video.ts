@@ -1,4 +1,4 @@
-export type EmbedKind = 'youtube' | 'vimeo' | 'embed' | 'file' | 'page' | 'none'
+export type EmbedKind = 'youtube' | 'vimeo' | 'telegram' | 'embed' | 'file' | 'page' | 'none'
 
 export interface ResolvedSource {
   kind: EmbedKind
@@ -28,6 +28,75 @@ export function youTubeId(url: string): string | null {
   }
 }
 
+export interface TelegramPost {
+  channel: string
+  messageId: string
+  postPath: string
+  embedSrc: string
+}
+
+const TELEGRAM_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog'])
+const TELEGRAM_RESERVED = new Set([
+  'addemoji',
+  'addlist',
+  'addstickers',
+  'addtheme',
+  'boost',
+  'c',
+  'confirmphone',
+  'contact',
+  'giftcode',
+  'iv',
+  'joinchat',
+  'login',
+  'm',
+  'proxy',
+  'setlanguage',
+  'share',
+  'socks',
+])
+
+/**
+ * Extract a public Telegram post from a `t.me/<channel>/<message>` link.
+ * Private `/c/…` posts and invite links are intentionally rejected: they do
+ * not expose Telegram's public post embed to anonymous website visitors.
+ */
+export function telegramPost(url: string): TelegramPost | null {
+  try {
+    const u = new URL(url.trim())
+    const host = u.hostname.replace(/^www\./, '').toLowerCase()
+    if (!TELEGRAM_HOSTS.has(host)) return null
+
+    const segments = u.pathname
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment)
+        } catch {
+          return segment
+        }
+      })
+
+    // `/s/<channel>/<message>` is the public web-preview shape of the same post.
+    const postSegments = segments[0]?.toLowerCase() === 's' ? segments.slice(1) : segments
+    const [channel, messageId] = postSegments
+    if (!channel || !messageId) return null
+    if (TELEGRAM_RESERVED.has(channel.toLowerCase()) || channel.startsWith('+')) return null
+    if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(channel) || !/^\d+$/.test(messageId)) return null
+
+    const postPath = `${channel}/${messageId}`
+    return {
+      channel,
+      messageId,
+      postPath,
+      embedSrc: `https://t.me/${postPath}?embed=1&userpic=false&single=1&dark=1`,
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Turn a pasted URL into something we can render in a player. */
 export function resolveSource(url?: string): ResolvedSource {
   if (!url || !url.trim()) return { kind: 'none', src: '' }
@@ -41,6 +110,9 @@ export function resolveSource(url?: string): ResolvedSource {
       poster: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`,
     }
   }
+
+  const telegram = telegramPost(raw)
+  if (telegram) return { kind: 'telegram', src: telegram.embedSrc }
 
   try {
     const u = new URL(raw)

@@ -20,7 +20,9 @@ export default function ResultsPage() {
     return (
       video.title.toLowerCase().includes(needle) ||
       channelName.toLowerCase().includes(needle) ||
-      video.category.toLowerCase().includes(needle)
+      video.category.toLowerCase().includes(needle) ||
+      (video.description?.toLowerCase().includes(needle) ?? false) ||
+      (video.tags?.some((tag) => tag.toLowerCase().includes(needle)) ?? false)
     )
   })
 
@@ -35,11 +37,11 @@ export default function ResultsPage() {
   if (!query) {
     return (
       <>
-        <PageHeading title="Search" subtitle="Find videos, channels and topics across GridWatch." />
+        <PageHeading title="Search" subtitle="Search adult videos, pornstars, categories and tags." />
         <EmptyState
           icon={<Search size={24} />}
           title="What are you looking for?"
-          description="Use the search bar at the top to look up videos, channels or topics."
+          description="Use the search bar at the top to look up adult videos, pornstars, categories and tags."
           action={
             <Link
               to="/"
@@ -100,7 +102,10 @@ export default function ResultsPage() {
             <VideoRow
               key={video.id}
               video={video}
-              description={`${video.category} · ${video.views} · ${video.publishedAt}. Watch ${video.title} in full on GridWatch.`}
+              description={
+                video.description ??
+                `${video.category} · ${video.views} · ${video.publishedAt}. Watch ${video.title} in full on AfterDark.`
+              }
             />
           ))}
         </div>

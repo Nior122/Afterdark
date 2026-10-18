@@ -22,7 +22,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
   const [title, setTitle] = useState('')
   const [thumbnail, setThumbnail] = useState('')
   const [duration, setDuration] = useState('')
-  const [category, setCategory] = useState<string>('Tech')
+  const [category, setCategory] = useState<string>('POV')
   const [error, setError] = useState('')
   const [fetching, setFetching] = useState(false)
 
@@ -46,7 +46,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
       setTitle('')
       setThumbnail('')
       setDuration('')
-      setCategory('Tech')
+      setCategory('POV')
       setError('')
     }
   }, [open])
@@ -126,7 +126,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               <h2 id="create-title" className="text-[17px] font-bold tracking-[-0.01em]">
                 Add a video
               </h2>
-              <p className="text-[12.5px] text-muted">Paste a link — no upload or storage needed.</p>
+              <p className="text-[12.5px] text-muted">Paste an adult video link — no upload or storage needed.</p>
             </div>
           </div>
           <button
@@ -164,7 +164,9 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                     ? 'Vimeo link detected'
                     : source.kind === 'file'
                       ? 'Direct video file detected'
-                      : source.kind === 'embed'
+                      : source.kind === 'telegram'
+                        ? 'Public Telegram post detected'
+                        : source.kind === 'embed'
                         ? 'Embeddable player detected'
                         : source.kind === 'page'
                           ? 'External page link'
@@ -188,14 +190,14 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   setError('')
                 }}
                 onBlur={() => void lookupMetadata()}
-                placeholder="https://www.youtube.com/watch?v=… or https://example.com/clip.mp4"
+                placeholder="https://t.me/yourchannel/123 or https://example.com/embed/…"
                 autoFocus
                 spellCheck={false}
                 className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
               <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-                YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
-                play inline in a sandboxed player. Other pages only show a preview.
+                Public Telegram posts, YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
+                play inline. Private Telegram and other page links only show a preview.
               </p>
             </div>
 
@@ -213,7 +215,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   setTitle(event.target.value)
                   setError('')
                 }}
-                placeholder="e.g. Building a silent 4K editing rig"
+                placeholder="e.g. Amateur POV homemade video"
                 className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
             </div>
@@ -285,7 +287,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               </button>
               <button
                 type="submit"
-                className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(109,40,217,0.9)] transition hover:brightness-105 active:scale-[0.98]"
+                className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(190,18,60,0.9)] transition hover:brightness-105 active:scale-[0.98]"
               >
                 <Plus size={17} strokeWidth={2.6} />
                 Add video
