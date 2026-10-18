@@ -17,6 +17,7 @@ import {
   type Ad,
   type Video,
 } from '../data/seed'
+import { fetchTelegramFeed } from './telegramFeed'
 import { guessThumbnail, resolveSource } from './video'
 
 export interface NewVideoInput {
@@ -89,6 +90,7 @@ function loadState(): PersistedState {
     const validVideoIds = new Set(
       [...SEED_VIDEOS, ...RECOMMENDED_ADS, ...TRENDING_ADS, ...userVideos].map((v) => v.id),
     )
+    const isKnownId = (id: string) => validVideoIds.has(id) || id.startsWith('tg-')
     const validChannelIds = new Set(ALL_CHANNELS.map((channel) => channel.id))
     const savedSubscriptions = Array.isArray(parsed.subscriptions)
       ? parsed.subscriptions.filter((id) => validChannelIds.has(id))
@@ -96,13 +98,13 @@ function loadState(): PersistedState {
     return {
       userVideos,
       watchLater: Array.isArray(parsed.watchLater)
-        ? parsed.watchLater.filter((id) => validVideoIds.has(id))
+        ? parsed.watchLater.filter((id) => isKnownId(id))
         : DEFAULT_STATE.watchLater,
       liked: Array.isArray(parsed.liked)
-        ? parsed.liked.filter((id) => validVideoIds.has(id))
+        ? parsed.liked.filter((id) => isKnownId(id))
         : DEFAULT_STATE.liked,
       history: Array.isArray(parsed.history)
-        ? parsed.history.filter((entry) => entry && validVideoIds.has(entry.id))
+        ? parsed.history.filter((entry) => entry && isKnownId(entry.id))
         : DEFAULT_STATE.history,
       subscriptions:
         savedSubscriptions && savedSubscriptions.length > 0
@@ -120,6 +122,7 @@ const StoreContext = createContext<StoreValue | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PersistedState>(loadState)
+  const [remoteVideos, setRemoteVideos] = useState<Video[]>([])
 
   useEffect(() => {
     try {
@@ -129,8 +132,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state])
 
+  useEffect(() => {
+    let cancelled = false
+    void fetchTelegramFeed().then((videos) => {
+      if (!cancelled) setRemoteVideos(videos)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const ads = useMemo(() => [...RECOMMENDED_ADS, ...TRENDING_ADS], [])
-  const allVideos = useMemo(() => [...state.userVideos, ...SEED_VIDEOS], [state.userVideos])
+  const allVideos = useMemo(() => {
+    const seen = new Set<string>()
+    const merged: Video[] = []
+    for (const video of [...state.userVideos, ...remoteVideos, ...SEED_VIDEOS]) {
+      if (seen.has(video.id)) continue
+      seen.add(video.id)
+      merged.push(video)
+    }
+    return merged
+  }, [state.userVideos, remoteVideos])
 
   const addVideo = useCallback((input: NewVideoInput) => {
     const source = resolveSource(input.videoUrl)

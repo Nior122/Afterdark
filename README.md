@@ -48,6 +48,20 @@ category and optional duration (`8:31` or seconds). Everything is stored in the 
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are
 tagged **Yours** and can be deleted from their card menu or the watch page.
 
+## Telegram bot publishing (optional)
+
+Forward a video to a Telegram bot and it appears on the site for everyone — including videos
+from private chats/channels that the public embed cannot reach. A tiny Cloudflare Worker
+(`worker/worker.js`) receives the bot's updates, stores only Telegram file IDs in KV, publishes
+a JSON feed at `/api/videos`, and proxies playback/thumbnails so the bot token never reaches
+the browser. The site merges that feed into the catalogue when the build-time variable
+`VITE_TELEGRAM_FEED_URL` is set (GitHub repo variable for Pages deploys, or `.env.local` —
+see `.env.example`); unset, the site is unchanged. Bot commands: send a video to publish
+(caption = title, `#Hashtags` = tags/category), `/list`, `/remove <id>`. One-time setup
+(~10 minutes, all free) is documented step-by-step in
+[docs/telegram-bot-setup.md](docs/telegram-bot-setup.md). Telegram bots can only fetch files
+up to 20 MB, so larger videos still go through public `t.me` links.
+
 ## Screens
 
 | Route | Description |
