@@ -1,5 +1,0 @@
-# Cloudflare Pages SPA fallback.
-# The app has no client-side router (deep links exist only as #/terms and #/privacy),
-# so this exists for the one real case: a stale link or a typo in a path should land on
-# the app rather than a 404.
-/*    /index.html   200
