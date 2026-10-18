@@ -1,0 +1,127 @@
+export type EmbedKind = 'youtube' | 'vimeo' | 'file' | 'page' | 'none'
+
+export interface ResolvedSource {
+  kind: EmbedKind
+  src: string
+  poster?: string
+}
+
+const FILE_EXT = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?.*)?$/i
+
+/** Extract a YouTube video id from any common URL shape. */
+export function youTubeId(url: string): string | null {
+  try {
+    const u = new URL(url.trim())
+    const host = u.hostname.replace(/^www\./, '').toLowerCase()
+    if (host === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null
+    if (host.endsWith('youtube.com') || host === 'youtube-nocookie.com') {
+      if (u.pathname === '/watch') return u.searchParams.get('v')
+      const match = u.pathname.match(/^\/(?:embed|shorts|live|v)\/([^/?#]+)/)
+      if (match) return match[1]
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Turn a pasted URL into something we can render in a player. */
+export function resolveSource(url?: string): ResolvedSource {
+  if (!url || !url.trim()) return { kind: 'none', src: '' }
+  const raw = url.trim()
+
+  const yt = youTubeId(raw)
+  if (yt) {
+    return {
+      kind: 'youtube',
+      src: `https://www.youtube-nocookie.com/embed/${yt}?rel=0&autoplay=1`,
+      poster: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`,
+    }
+  }
+
+  try {
+    const u = new URL(raw)
+    const host = u.hostname.replace(/^www\./, '').toLowerCase()
+    if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) {
+      const id = u.pathname.split('/').filter(Boolean).pop()
+      if (id) return { kind: 'vimeo', src: `https://player.vimeo.com/video/${id}` }
+    }
+    if (FILE_EXT.test(u.pathname)) return { kind: 'file', src: raw }
+    return { kind: 'page', src: raw }
+  } catch {
+    if (FILE_EXT.test(raw)) return { kind: 'file', src: raw }
+    return { kind: 'none', src: '' }
+  }
+}
+
+/** Best-effort thumbnail guess for a pasted video URL. */
+export function guessThumbnail(url: string): string | undefined {
+  const yt = youTubeId(url)
+  if (yt) return `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`
+  return undefined
+}
+
+const UNITS = [
+  { limit: 1e9, suffix: 'B' },
+  { limit: 1e6, suffix: 'M' },
+  { limit: 1e3, suffix: 'K' },
+]
+
+export function formatCount(n: number): string {
+  for (const { limit, suffix } of UNITS) {
+    if (n >= limit) {
+      const value = n / limit
+      return `${value >= 10 ? Math.round(value) : value.toFixed(1).replace(/\.0$/, '')}${suffix}`
+    }
+  }
+  return String(n)
+}
+
+export function formatViews(views: number): string {
+  return `${formatCount(views)} views`
+}
+
+export function timeAgo(timestamp: number): string {
+  const seconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000))
+  const steps: [number, string][] = [
+    [60, 'second'],
+    [60, 'minute'],
+    [24, 'hour'],
+    [7, 'day'],
+    [4.348, 'week'],
+    [12, 'month'],
+    [Infinity, 'year'],
+  ]
+  let value = seconds
+  for (const [step, name] of steps) {
+    if (value < step) {
+      const rounded = Math.floor(value)
+      return `${rounded} ${name}${rounded === 1 ? '' : 's'} ago`
+    }
+    value /= step
+  }
+  return 'just now'
+}
+
+export function parseDuration(input: string): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  if (/^\d{1,2}(:\d{2}){1,2}$/.test(trimmed)) {
+    return trimmed
+      .split(':')
+      .map((part) => String(Number(part)).padStart(2, '0'))
+      .join(':')
+      .replace(/^0(?=\d:)/, '')
+  }
+  if (/^\d+$/.test(trimmed)) {
+    const total = Number(trimmed)
+    const h = Math.floor(total / 3600)
+    const m = Math.floor((total % 3600) / 60)
+    const s = total % 60
+    return h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${m}:${String(s).padStart(2, '0')}`
+  }
+  return null
+}
+
