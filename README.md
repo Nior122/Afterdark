@@ -149,3 +149,13 @@ npm run preview        # serve dist/ at http://localhost:4173
 - `0c3834b` deployment config for GitHub Pages / Vercel / Netlify.
 - `d766358` sandboxed generic embed players + branded placeholder poster.
 - `875ac5e` initial GridWatch build: home feed, watch page, create-by-URL, search, library.
+
+## Hosting cheat-sheet
+
+| Host | What to do |
+| --- | --- |
+| GitHub Pages | Settings → Pages → Source **GitHub Actions**, then merge into `main` (workflow deploys automatically) |
+| Vercel | Import repo at vercel.com/new → Deploy (settings read from `vercel.json`) |
+| Netlify | Import repo at app.netlify.com/start (settings read from `netlify.toml`) |
+| Cloudflare Pages | Build `npm run build`, output `dist` |
+| Any web server | Copy `dist/` — hash routing needs no rewrites |
