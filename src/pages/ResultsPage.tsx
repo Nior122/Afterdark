@@ -1,0 +1,116 @@
+import { Link, useSearchParams } from 'react-router-dom'
+import { Search, UserPlus, Check } from 'lucide-react'
+import PageHeading from '../components/PageHeading'
+import VideoRow from '../components/VideoRow'
+import EmptyState from '../components/EmptyState'
+import { CHANNELS } from '../data/seed'
+import { usePageTitle } from '../lib/hooks'
+import { useStore } from '../lib/store'
+
+export default function ResultsPage() {
+  const [params] = useSearchParams()
+  const query = (params.get('q') ?? '').trim()
+  const { allVideos, ads, subscriptions, toggleSubscription } = useStore()
+  usePageTitle(query ? `Search: ${query}` : 'Search')
+
+  const needle = query.toLowerCase()
+  const results = [...allVideos, ...ads].filter((video) => {
+    if (!needle) return false
+    const channelName = CHANNELS.find((channel) => channel.id === video.channelId)?.name ?? ''
+    return (
+      video.title.toLowerCase().includes(needle) ||
+      channelName.toLowerCase().includes(needle) ||
+      video.category.toLowerCase().includes(needle)
+    )
+  })
+
+  const channelResults = needle
+    ? CHANNELS.filter(
+        (channel) =>
+          channel.id !== 'you' &&
+          (channel.name.toLowerCase().includes(needle) || channel.name.toLowerCase().replace(/\s/g, '').includes(needle)),
+      )
+    : []
+
+  if (!query) {
+    return (
+      <>
+        <PageHeading title="Search" subtitle="Find videos, channels and topics across GridWatch." />
+        <EmptyState
+          icon={<Search size={24} />}
+          title="What are you looking for?"
+          description="Use the search bar at the top to look up videos, channels or topics."
+          action={
+            <Link
+              to="/"
+              className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-4 text-[13.5px] font-semibold text-white"
+            >
+              Browse home
+            </Link>
+          }
+        />
+      </>
+    )
+  }
+
+  return (
+    <>
+      <PageHeading
+        title={`Results for “${query}”`}
+        subtitle={`${results.length} ${results.length === 1 ? 'result' : 'results'}`}
+      />
+
+      {channelResults.length > 0 && (
+        <div className="mb-8 rounded-2xl border border-line p-4">
+          <p className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted">Channels</p>
+          <div className="flex flex-col divide-y divide-line">
+            {channelResults.map((channel) => {
+              const isSubscribed = subscriptions.includes(channel.id)
+              return (
+                <div key={channel.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+                  <Link to={`/channel/${channel.id}`}>
+                    <img src={channel.avatar} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  </Link>
+                  <div className="min-w-0 flex-1">
+                    <Link to={`/channel/${channel.id}`} className="block truncate text-[14.5px] font-semibold hover:text-brand-700">
+                      {channel.name}
+                    </Link>
+                    <p className="text-[12.5px] text-muted">{channel.subscribers} subscribers</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleSubscription(channel.id)}
+                    className={[
+                      'flex h-9 items-center gap-1.5 rounded-full px-4 text-[12.5px] font-semibold transition',
+                      isSubscribed ? 'bg-[#f2f2f4] text-ink' : 'bg-ink text-white hover:bg-black',
+                    ].join(' ')}
+                  >
+                    {isSubscribed ? <><Check size={14} /> Subscribed</> : <><UserPlus size={14} /> Subscribe</>}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {results.length > 0 ? (
+        <div className="flex flex-col gap-5">
+          {results.map((video) => (
+            <VideoRow
+              key={video.id}
+              video={video}
+              description={`${video.category} · ${video.views} · ${video.publishedAt}. Watch ${video.title} in full on GridWatch.`}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon={<Search size={24} />}
+          title="No results found"
+          description={`Nothing matched “${query}”. Try a different keyword, or add a video with a link.`}
+        />
+      )}
+    </>
+  )
+}
