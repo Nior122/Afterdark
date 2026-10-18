@@ -5,7 +5,7 @@ dist-ssr
 .DS_Store
 .eslintcache
 *.tsbuildinfo
-localhost*.log
+*.log
 .vscode/*
 !.vscode/extensions.json
 .idea

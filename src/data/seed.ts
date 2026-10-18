@@ -1,3 +1,4 @@
+import { asset } from '../lib/asset'
 export interface Channel {
   id: string
   name: string
@@ -29,14 +30,14 @@ export interface Ad extends Video {
 }
 
 export const AVATARS = {
-  techbit: '/avatars/techbit.svg',
-  cinemasphere: '/avatars/cinemasphere.jpg',
-  gameplay: '/avatars/gameplay.svg',
-  newsnow: '/avatars/newsnow.jpg',
-  sportscentral: '/avatars/sportscentral.svg',
-  cinemax: '/avatars/cinemax.jpg',
-  chillwave: '/avatars/chillwave.svg',
-  user: '/avatars/user.jpg',
+  techbit: asset("/avatars/techbit.svg"),
+  cinemasphere: asset("/avatars/cinemasphere.jpg"),
+  gameplay: asset("/avatars/gameplay.svg"),
+  newsnow: asset("/avatars/newsnow.jpg"),
+  sportscentral: asset("/avatars/sportscentral.svg"),
+  cinemax: asset("/avatars/cinemax.jpg"),
+  chillwave: asset("/avatars/chillwave.svg"),
+  user: asset("/avatars/user.jpg"),
 } as const
 
 export const CHANNELS: Channel[] = [
@@ -55,14 +56,14 @@ export const CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
 )
 
 export const ADVERTISERS: Channel[] = [
-  { id: 'ad-nova', name: 'Nova Bank', avatar: '/avatars/nova.svg', verified: true, subscribers: '' },
-  { id: 'ad-vista', name: 'Vista Travel', avatar: '/avatars/vista.svg', verified: true, subscribers: '' },
-  { id: 'ad-pulse', name: 'Pulse Gaming', avatar: '/avatars/pulse.svg', verified: true, subscribers: '' },
-  { id: 'ad-meridian', name: 'Meridian News', avatar: '/avatars/meridian.svg', verified: true, subscribers: '' },
-  { id: 'ad-strike', name: 'Strike Football', avatar: '/avatars/strike.svg', verified: true, subscribers: '' },
+  { id: 'ad-nova', name: 'Nova Bank', avatar: asset("/avatars/nova.svg"), verified: true, subscribers: '' },
+  { id: 'ad-vista', name: 'Vista Travel', avatar: asset("/avatars/vista.svg"), verified: true, subscribers: '' },
+  { id: 'ad-pulse', name: 'Pulse Gaming', avatar: asset("/avatars/pulse.svg"), verified: true, subscribers: '' },
+  { id: 'ad-meridian', name: 'Meridian News', avatar: asset("/avatars/meridian.svg"), verified: true, subscribers: '' },
+  { id: 'ad-strike', name: 'Strike Football', avatar: asset("/avatars/strike.svg"), verified: true, subscribers: '' },
   { id: 'ad-cinemax', name: 'CineMax+', avatar: AVATARS.cinemax, verified: true, subscribers: '' },
-  { id: 'ad-sonic', name: 'Sonic Music', avatar: '/avatars/sonic.svg', verified: true, subscribers: '' },
-  { id: 'ad-northvolt', name: 'NorthVolt', avatar: '/avatars/northvolt.svg', verified: true, subscribers: '' },
+  { id: 'ad-sonic', name: 'Sonic Music', avatar: asset("/avatars/sonic.svg"), verified: true, subscribers: '' },
+  { id: 'ad-northvolt', name: 'NorthVolt', avatar: asset("/avatars/northvolt.svg"), verified: true, subscribers: '' },
 ]
 
 export const ALL_CHANNELS: Channel[] = [...CHANNELS, ...ADVERTISERS]
@@ -90,7 +91,7 @@ export const RECOMMENDED_ADS: Ad[] = [
     advertiser: 'Nova Bank',
     adHeadline: '',
     title: 'The Future of Smart Cities',
-    thumbnail: '/thumbnails/city.jpg',
+    thumbnail: asset("/thumbnails/city.jpg"),
     duration: '2:45',
     views: '128K views',
     publishedAt: '2 days ago',
@@ -104,7 +105,7 @@ export const RECOMMENDED_ADS: Ad[] = [
     advertiser: 'Vista Travel',
     adHeadline: 'Get 20% off on annual plans',
     title: "Exploring the World's Most Beautiful Places",
-    thumbnail: '/thumbnails/mountains.jpg',
+    thumbnail: asset("/thumbnails/mountains.jpg"),
     duration: '10:12',
     views: '245K views',
     publishedAt: '1 week ago',
@@ -118,7 +119,7 @@ export const RECOMMENDED_ADS: Ad[] = [
     advertiser: 'Pulse Gaming',
     adHeadline: 'New loot, new season. Play now!',
     title: 'Cyber Arena – Season 7 Gameplay',
-    thumbnail: '/thumbnails/gaming.jpg',
+    thumbnail: asset("/thumbnails/gaming.jpg"),
     duration: '8:31',
     views: '89K views',
     publishedAt: '3 days ago',
@@ -132,7 +133,7 @@ export const RECOMMENDED_ADS: Ad[] = [
     advertiser: 'Meridian News',
     adHeadline: 'Stay informed. Get the full story.',
     title: 'Top Headlines: Global Markets Update',
-    thumbnail: '/thumbnails/news.jpg',
+    thumbnail: asset("/thumbnails/news.jpg"),
     duration: '5:27',
     views: '76K views',
     publishedAt: '8 hours ago',
@@ -150,7 +151,7 @@ export const TRENDING_ADS: Ad[] = [
     advertiser: 'Strike Football',
     adHeadline: 'Built for champions.',
     title: 'Top 10 Soccer Goals This Week',
-    thumbnail: '/thumbnails/soccer.jpg',
+    thumbnail: asset("/thumbnails/soccer.jpg"),
     duration: '3:15',
     views: '312K views',
     publishedAt: '1 day ago',
@@ -164,7 +165,7 @@ export const TRENDING_ADS: Ad[] = [
     advertiser: 'CineMax+',
     adHeadline: 'Now streaming. Only on CineMax',
     title: 'Shadow Protocol – Official Trailer',
-    thumbnail: '/thumbnails/hooded.jpg',
+    thumbnail: asset("/thumbnails/hooded.jpg"),
     duration: '12:45',
     views: '1.2M views',
     publishedAt: '4 days ago',
@@ -178,7 +179,7 @@ export const TRENDING_ADS: Ad[] = [
     advertiser: 'Sonic Music',
     adHeadline: 'Millions of songs. One app.',
     title: 'Lo-Fi Beats to Study / Relax To',
-    thumbnail: '/thumbnails/waveform.jpg',
+    thumbnail: asset("/thumbnails/waveform.jpg"),
     duration: '1:02:34',
     views: '530K views',
     publishedAt: '6 days ago',
@@ -192,7 +193,7 @@ export const TRENDING_ADS: Ad[] = [
     advertiser: 'NorthVolt',
     adHeadline: 'Upgrade your tech. Save more.',
     title: 'How to Build Your First PC – Step by Step',
-    thumbnail: '/thumbnails/tech.jpg',
+    thumbnail: asset("/thumbnails/tech.jpg"),
     duration: '6:48',
     views: '97K views',
     publishedAt: '5 days ago',
@@ -206,7 +207,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-concert',
     title: 'Inside the Neon Tour: Night Two Highlights',
-    thumbnail: '/thumbnails/concert.jpg',
+    thumbnail: asset("/thumbnails/concert.jpg"),
     duration: '14:02',
     views: '842K views',
     publishedAt: '2 days ago',
@@ -216,7 +217,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-nebula',
     title: 'What the New Telescope Found in the Carina Nebula',
-    thumbnail: '/thumbnails/nebula.jpg',
+    thumbnail: asset("/thumbnails/nebula.jpg"),
     duration: '18:27',
     views: '1.4M views',
     publishedAt: '1 week ago',
@@ -226,7 +227,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-cooking',
     title: 'Restaurant Secrets: The Perfect Flambé Pasta',
-    thumbnail: '/thumbnails/cooking.jpg',
+    thumbnail: asset("/thumbnails/cooking.jpg"),
     duration: '11:36',
     views: '226K views',
     publishedAt: '3 days ago',
@@ -236,7 +237,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-supercar',
     title: 'Pushing the New Roadster Down the Pacific Coast',
-    thumbnail: '/thumbnails/supercar.jpg',
+    thumbnail: asset("/thumbnails/supercar.jpg"),
     duration: '9:54',
     views: '604K views',
     publishedAt: '5 days ago',
@@ -246,7 +247,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-city-doc',
     title: 'How Cities Learned to Think: Urban Tech Explained',
-    thumbnail: '/thumbnails/city.jpg',
+    thumbnail: asset("/thumbnails/city.jpg"),
     duration: '22:08',
     views: '318K views',
     publishedAt: '2 weeks ago',
@@ -256,7 +257,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-lake',
     title: 'A Week Alone in the Rockies (4K Cinematic)',
-    thumbnail: '/thumbnails/mountains.jpg',
+    thumbnail: asset("/thumbnails/mountains.jpg"),
     duration: '21:15',
     views: '1.1M views',
     publishedAt: '1 month ago',
@@ -266,7 +267,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-cinema',
     title: 'The Making of a Cinema Classic: Restored in 4K',
-    thumbnail: '/thumbnails/hooded.jpg',
+    thumbnail: asset("/thumbnails/hooded.jpg"),
     duration: '16:41',
     views: '487K views',
     publishedAt: '6 days ago',
@@ -276,7 +277,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-news-brief',
     title: 'Morning Brief: What You Missed Overnight',
-    thumbnail: '/thumbnails/news.jpg',
+    thumbnail: asset("/thumbnails/news.jpg"),
     duration: '7:12',
     views: '410K views',
     publishedAt: '5 hours ago',
@@ -286,7 +287,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-game-meta',
     title: 'The New Meta: 10 Loadouts That Actually Work',
-    thumbnail: '/thumbnails/gaming.jpg',
+    thumbnail: asset("/thumbnails/gaming.jpg"),
     duration: '13:29',
     views: '2.3M views',
     publishedAt: '4 days ago',
@@ -296,7 +297,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-match',
     title: 'Full Match Recap: The Comeback of the Season',
-    thumbnail: '/thumbnails/soccer.jpg',
+    thumbnail: asset("/thumbnails/soccer.jpg"),
     duration: '19:47',
     views: '3.6M views',
     publishedAt: '1 day ago',
@@ -306,7 +307,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-lofi',
     title: 'Late Night Session – Deep Focus Mix',
-    thumbnail: '/thumbnails/waveform.jpg',
+    thumbnail: asset("/thumbnails/waveform.jpg"),
     duration: '58:19',
     views: '2.9M views',
     publishedAt: '3 weeks ago',
@@ -316,7 +317,7 @@ export const SEED_VIDEOS: Video[] = [
   {
     id: 'v-pc-build',
     title: 'Build a Silent 4K Editing Rig for Under $900',
-    thumbnail: '/thumbnails/tech.jpg',
+    thumbnail: asset("/thumbnails/tech.jpg"),
     duration: '24:03',
     views: '156K views',
     publishedAt: '2 days ago',

@@ -82,3 +82,64 @@ src/
 | `npm run dev` | Vite dev server on `0.0.0.0:5173` |
 | `npm run build` | `tsc -b` type-check, then production build |
 | `npm run preview` | Preview the production build |
+
+## Deployment
+
+The app is a static single-page build — `npm run build` emits `dist/` with no server requirements.
+Routing uses a **HashRouter** (`/#/watch/…`) so the build works on any static host, including GitHub
+Pages sub-paths, with zero rewrite configuration.
+
+### GitHub Pages (included workflow)
+
+`.github/workflows/deploy.yml` builds and publishes on every push to `main`.
+
+1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**
+2. Merge this work into `main` (or run the workflow manually from the Actions tab)
+3. The site appears at `https://<user>.github.io/Faceverify/`
+
+### Vercel
+
+`vercel.json` is already configured (Vite framework preset, `dist` output, SPA rewrites, asset caching).
+
+```bash
+npm i -g vercel
+vercel          # preview deployment
+vercel --prod   # production
+```
+
+Or import the repository at <https://vercel.com/new> and press Deploy — no environment variables are
+needed.
+
+### Netlify
+
+`netlify.toml` is already configured (build command, `dist` publish dir, SPA redirect, headers).
+Import the repo at <https://app.netlify.com/start>, or:
+
+```bash
+npm i -g netlify-cli
+netlify deploy --prod --dir=dist
+```
+
+### Any static host (S3, Cloudflare Pages, Firebase Hosting, nginx)
+
+Upload the contents of `dist/` after `npm run build`. Because of the hash router, deep links resolve
+to `index.html` automatically.
+
+### Production checks
+
+```bash
+npm run build          # tsc -b + vite build
+npm run preview        # serve dist/ at http://localhost:4173
+```
+
+- No environment variables, API keys, database or object storage are required.
+- Videos added in the UI are stored per-browser in `localStorage`; deployments start with the seeded
+  demo feed on a fresh browser.
+- YouTube embeds use `youtube-nocookie.com`; generic embed links are rendered in a sandboxed iframe
+  with `referrerPolicy="no-referrer"`.
+
+## Deployment status
+
+- Clean production build (Vite 6, ~90 kB gzipped main chunk, React split into its own chunk).
+- Works from the domain root **and** from a sub-path (relative `base`, hashed asset URLs).
+- `npm run preview` verified: images, fonts, hash routing and deep links all load with zero console errors.

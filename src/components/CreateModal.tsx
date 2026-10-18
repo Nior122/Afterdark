@@ -1,3 +1,4 @@
+import { asset } from '../lib/asset'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Film, Image as ImageIcon, Link2, Loader2, Plus, X } from 'lucide-react'
@@ -26,7 +27,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
   const [fetching, setFetching] = useState(false)
 
   const source = useMemo(() => resolveSource(videoUrl), [videoUrl])
-  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || '/thumbnails/placeholder.svg'
+  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || asset('/thumbnails/placeholder.svg')
 
   useEscape(onClose, open)
 

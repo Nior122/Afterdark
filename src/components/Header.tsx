@@ -1,3 +1,4 @@
+import { asset } from '../lib/asset'
 import { useCallback, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -20,9 +21,9 @@ interface HeaderProps {
 }
 
 const NOTIFICATIONS = [
-  { id: 1, avatar: '/avatars/chillwave.svg', text: 'ChillWave uploaded “Inside the Neon Tour”', time: '2h ago' },
-  { id: 2, avatar: '/avatars/techbit.svg', text: 'TechBit is live: Building a silent PC', time: '5h ago' },
-  { id: 3, avatar: '/avatars/newsnow.jpg', text: 'NewsNow posted a new morning brief', time: '8h ago' },
+  { id: 1, avatar: asset("/avatars/chillwave.svg"), text: 'ChillWave uploaded “Inside the Neon Tour”', time: '2h ago' },
+  { id: 2, avatar: asset("/avatars/techbit.svg"), text: 'TechBit is live: Building a silent PC', time: '5h ago' },
+  { id: 3, avatar: asset("/avatars/newsnow.jpg"), text: 'NewsNow posted a new morning brief', time: '8h ago' },
 ]
 
 export default function Header({ onCreate, onToggleSidebar }: HeaderProps) {

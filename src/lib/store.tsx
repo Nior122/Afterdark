@@ -1,3 +1,4 @@
+import { asset } from '../lib/asset'
 import {
   createContext,
   useCallback,
@@ -113,7 +114,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         input.thumbnail?.trim() ||
         source.poster ||
         guessThumbnail(input.videoUrl) ||
-        '/thumbnails/placeholder.svg',
+        asset("/thumbnails/placeholder.svg"),
       duration: input.duration?.trim() || '—',
       views: '0 views',
       publishedAt: 'Just now',

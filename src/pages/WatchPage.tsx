@@ -1,3 +1,4 @@
+import { asset } from '../lib/asset'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -42,7 +43,7 @@ const SEED_COMMENTS: Comment[] = [
   {
     id: 'c2',
     name: 'Maya Okafor',
-    avatar: '/avatars/chillwave.svg',
+    avatar: asset("/avatars/chillwave.svg"),
     time: '5 days ago',
     text: 'This deserves way more views. The production quality is unreal — instantly subscribed.',
     likes: 84,
