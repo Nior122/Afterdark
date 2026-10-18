@@ -32,6 +32,10 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Optional public URL of the Telegram bot worker; set as a repo
+          # variable to enable the bot feed (docs/telegram-bot-setup.md).
+          VITE_TELEGRAM_FEED_URL: ${{ vars.VITE_TELEGRAM_FEED_URL }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -4,7 +4,7 @@ import CategoryBar from '../components/CategoryBar'
 import VideoGrid from '../components/VideoGrid'
 import EmptyState from '../components/EmptyState'
 import PageHeading from '../components/PageHeading'
-import { CATEGORIES } from '../data/seed'
+import { CATEGORIES, videoMatchesCategory } from '../data/seed'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 
@@ -15,14 +15,14 @@ export default function BrowsePage() {
   const title = match ?? category
   usePageTitle(title)
 
-  const videos = allVideos.filter((video) => video.category.toLowerCase() === title.toLowerCase())
+  const videos = allVideos.filter((video) => videoMatchesCategory(video, title))
 
   return (
     <>
       <CategoryBar active={title} />
       <PageHeading
         title={title}
-        subtitle={`${videos.length} ${videos.length === 1 ? 'video' : 'videos'} in ${title}`}
+        subtitle={`${videos.length} adult ${videos.length === 1 ? 'video' : 'videos'} in ${title}`}
       />
 
       {videos.length > 0 ? (

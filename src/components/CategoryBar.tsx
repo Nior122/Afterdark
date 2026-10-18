@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
-import { CATEGORIES } from '../data/seed'
+import { browsePath, CATEGORIES } from '../data/seed'
 
 export default function CategoryBar({ active = 'All' }: { active?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
@@ -25,11 +25,11 @@ export default function CategoryBar({ active = 'All' }: { active?: string }) {
             return (
               <Link
                 key={category}
-                to={category === 'All' ? '/' : `/browse/${category}`}
+                to={browsePath(category)}
                 className={[
                   'flex h-[38px] shrink-0 items-center rounded-full px-4 text-[14px] font-medium transition',
                   isActive
-                    ? 'bg-brand-600 text-white shadow-[0_4px_12px_-4px_rgba(109,40,217,0.6)]'
+                    ? 'bg-brand-600 text-white shadow-[0_4px_12px_-4px_rgba(190,18,60,0.6)]'
                     : 'bg-[#f2f2f4] text-ink hover:bg-[#e8e8ec]',
                 ].join(' ')}
                 aria-current={isActive ? 'page' : undefined}

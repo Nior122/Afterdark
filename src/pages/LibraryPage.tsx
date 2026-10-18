@@ -47,7 +47,7 @@ export default function LibraryPage({ onCreate }: { onCreate: () => void }) {
           <EmptyState
             icon={<PlaySquare size={24} />}
             title="No videos on your channel yet"
-            description="Paste a video URL to publish it instantly. No database or storage is involved — GridWatch only remembers the link."
+            description="Paste a video URL to publish it instantly. No database or storage is involved — AfterDark only remembers the link."
             action={
               <button
                 type="button"

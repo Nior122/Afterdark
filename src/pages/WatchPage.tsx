@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import VideoRow from '../components/VideoRow'
 import KebabMenu from '../components/KebabMenu'
+import EmbedPlayer from '../components/EmbedPlayer'
+import TelegramPlayer from '../components/TelegramPlayer'
 import NotFoundPage from './NotFoundPage'
 import { ALL_CHANNEL_MAP, AVATARS, type Ad } from '../data/seed'
 import { usePageTitle } from '../lib/hooks'
@@ -35,15 +37,15 @@ const SEED_COMMENTS: Comment[] = [
   {
     id: 'c1',
     name: 'Jordan Lee',
-    avatar: AVATARS.cinemasphere,
+    avatar: AVATARS.user,
     time: '2 days ago',
-    text: 'The pacing on this one is perfect. Watched it twice and caught new details the second time around.',
+    text: 'The POV camera work on this one is perfect. Watched it twice and caught new details the second time around.',
     likes: 128,
   },
   {
     id: 'c2',
     name: 'Maya Okafor',
-    avatar: asset("/avatars/chillwave.svg"),
+    avatar: asset("/avatars/pulse.svg"),
     time: '5 days ago',
     text: 'This deserves way more views. The production quality is unreal — instantly subscribed.',
     likes: 84,
@@ -141,18 +143,16 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
   const isSubscribed = subscriptions.includes(channel.id)
   const likeCount = 120 + (hashString(video.id) % 18000)
 
-  const description = [
-    `${video.title} — full episode in ${video.category}.`,
-    '',
-    'In this video we break down the story behind the scenes, the tools and the people involved, and what comes next. Chapters below.',
-    '',
-    '00:00 Intro',
-    '01:24 The setup',
-    '04:10 What actually happened',
-    `0${Math.min(9, 4 + (hashString(video.id) % 5))}:00 Wrap-up and next steps`,
-    '',
-    `#${video.category.toLowerCase().replace(/[^a-z0-9]/g, '')} #gridwatch #${channel.name.toLowerCase()}`,
-  ].join('\n')
+  const description =
+    video.description?.trim() ||
+    [
+      `${video.title} — watch the full video in ${video.category}.`,
+      '',
+      `Category: ${video.category}`,
+      video.tags?.length ? `Tags: ${video.tags.join(', ')}` : `More from ${channel.name} in this category.`,
+      '',
+      `#${video.category.toLowerCase().replace(/[^a-z0-9]/g, '')} #afterdark #${channel.name.toLowerCase()}`,
+    ].join('\n')
 
   async function copyLink() {
     try {
@@ -179,7 +179,12 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex flex-col gap-8 pt-4 rail:flex-row rail:gap-6">
       <div className="min-w-0 flex-1">
-        <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.5)]">
+        <div
+          className={[
+            'relative w-full overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.5)]',
+            source.kind === 'telegram' ? '' : 'aspect-video',
+          ].join(' ')}
+        >
           {(source.kind === 'youtube' || source.kind === 'vimeo') && (
             <iframe
               src={source.src}
@@ -191,14 +196,22 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
           )}
 
           {source.kind === 'embed' && (
-            <iframe
+            <EmbedPlayer
+              key={video.id}
               src={source.src}
               title={video.title}
-              className="absolute inset-0 h-full w-full"
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-presentation"
-              allowFullScreen
+              poster={video.thumbnail}
+              duration={video.duration}
+              protectedEmbed={Boolean(video.protectedEmbed)}
+            />
+          )}
+
+          {source.kind === 'telegram' && (
+            <TelegramPlayer
+              key={video.id}
+              src={source.src}
+              title={video.title}
+              poster={video.thumbnail}
             />
           )}
 
@@ -369,7 +382,21 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
             {description}
           </p>
 
-          {video.videoUrl && (
+          {video.tags && video.tags.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Tags">
+              {video.tags.map((tag) => (
+                <Link
+                  key={tag}
+                  to={`/results?q=${encodeURIComponent(tag)}`}
+                  className="rounded-full bg-white px-2.5 py-1 text-[11.5px] font-semibold text-[#3f3f46] ring-1 ring-[#dedee3] transition hover:bg-brand-50 hover:text-brand-700 hover:ring-brand-200"
+                >
+                  {tag}
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {video.videoUrl && !video.protectedEmbed && source.kind !== 'telegram' && (
             <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-muted">
               <Link2 size={14} className="text-brand-600" />
               <span className="max-w-full truncate">{video.videoUrl}</span>

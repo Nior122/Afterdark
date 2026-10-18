@@ -1,4 +1,4 @@
-export type EmbedKind = 'youtube' | 'vimeo' | 'embed' | 'file' | 'page' | 'none'
+export type EmbedKind = 'youtube' | 'vimeo' | 'telegram' | 'embed' | 'file' | 'page' | 'none'
 
 export interface ResolvedSource {
   kind: EmbedKind
@@ -28,6 +28,75 @@ export function youTubeId(url: string): string | null {
   }
 }
 
+export interface TelegramPost {
+  channel: string
+  messageId: string
+  postPath: string
+  embedSrc: string
+}
+
+const TELEGRAM_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog'])
+const TELEGRAM_RESERVED = new Set([
+  'addemoji',
+  'addlist',
+  'addstickers',
+  'addtheme',
+  'boost',
+  'c',
+  'confirmphone',
+  'contact',
+  'giftcode',
+  'iv',
+  'joinchat',
+  'login',
+  'm',
+  'proxy',
+  'setlanguage',
+  'share',
+  'socks',
+])
+
+/**
+ * Extract a public Telegram post from a `t.me/<channel>/<message>` link.
+ * Private `/c/…` posts and invite links are intentionally rejected: they do
+ * not expose Telegram's public post embed to anonymous website visitors.
+ */
+export function telegramPost(url: string): TelegramPost | null {
+  try {
+    const u = new URL(url.trim())
+    const host = u.hostname.replace(/^www\./, '').toLowerCase()
+    if (!TELEGRAM_HOSTS.has(host)) return null
+
+    const segments = u.pathname
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment)
+        } catch {
+          return segment
+        }
+      })
+
+    // `/s/<channel>/<message>` is the public web-preview shape of the same post.
+    const postSegments = segments[0]?.toLowerCase() === 's' ? segments.slice(1) : segments
+    const [channel, messageId] = postSegments
+    if (!channel || !messageId) return null
+    if (TELEGRAM_RESERVED.has(channel.toLowerCase()) || channel.startsWith('+')) return null
+    if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(channel) || !/^\d+$/.test(messageId)) return null
+
+    const postPath = `${channel}/${messageId}`
+    return {
+      channel,
+      messageId,
+      postPath,
+      embedSrc: `https://t.me/${postPath}?embed=1&userpic=false&single=1&dark=1`,
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Turn a pasted URL into something we can render in a player. */
 export function resolveSource(url?: string): ResolvedSource {
   if (!url || !url.trim()) return { kind: 'none', src: '' }
@@ -41,6 +110,9 @@ export function resolveSource(url?: string): ResolvedSource {
       poster: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`,
     }
   }
+
+  const telegram = telegramPost(raw)
+  if (telegram) return { kind: 'telegram', src: telegram.embedSrc }
 
   try {
     const u = new URL(raw)
@@ -65,6 +137,29 @@ export function guessThumbnail(url: string): string | undefined {
   const yt = youTubeId(url)
   if (yt) return `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`
   return undefined
+}
+
+/**
+ * Best-effort poster lookup for a public Telegram post. Browsers cannot read
+ * t.me pages cross-origin (no CORS headers), so this asks the Microlink
+ * metadata API for the post's Open Graph image — for video posts Telegram
+ * sets that to the actual video thumbnail served by its CDN. Returns
+ * undefined when unavailable; callers fall back to the placeholder artwork.
+ * Only the image URL is kept — nothing is downloaded or stored by the site.
+ */
+export async function fetchTelegramPoster(url: string): Promise<string | undefined> {
+  const post = telegramPost(url)
+  if (!post) return undefined
+  try {
+    const api = `https://api.microlink.io/?url=${encodeURIComponent(`https://t.me/${post.postPath}`)}`
+    const response = await fetch(api)
+    if (!response.ok) return undefined
+    const data = (await response.json()) as { data?: { image?: { url?: string } } }
+    const image = data.data?.image?.url
+    return image && /^https:\/\//i.test(image) ? image : undefined
+  } catch {
+    return undefined
+  }
 }
 
 const UNITS = [

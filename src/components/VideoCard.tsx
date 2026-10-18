@@ -28,6 +28,7 @@ export default function VideoCard({ video }: { video: FeedItem }) {
           src={video.thumbnail}
           alt={video.title}
           loading="lazy"
+          referrerPolicy="no-referrer"
           className="h-full w-full object-cover transition duration-500 group-hover/video:scale-[1.03]"
         />
 

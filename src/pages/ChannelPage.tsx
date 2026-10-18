@@ -10,14 +10,8 @@ import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 
 const BANNERS: Record<string, string> = {
-  techbit: 'from-violet-600 via-purple-600 to-indigo-700',
-  cinemasphere: 'from-slate-800 via-slate-700 to-zinc-900',
-  gameplay: 'from-fuchsia-600 via-purple-700 to-violet-900',
-  newsnow: 'from-sky-700 via-slate-800 to-slate-900',
-  sportscentral: 'from-emerald-600 via-teal-700 to-slate-900',
-  cinemax: 'from-zinc-900 via-neutral-800 to-stone-900',
-  chillwave: 'from-indigo-900 via-slate-900 to-black',
-  you: 'from-brand-500 via-purple-600 to-indigo-800',
+  'pov-central': 'from-rose-600 via-red-700 to-zinc-950',
+  you: 'from-brand-500 via-rose-600 to-zinc-900',
 }
 
 const TABS = ['Home', 'Videos', 'About'] as const
@@ -25,7 +19,7 @@ type Tab = (typeof TABS)[number]
 
 export default function ChannelPage({ onCreate }: { onCreate: () => void }) {
   const { channelId = '' } = useParams()
-  const { allVideos, userVideos, subscriptions, toggleSubscription } = useStore()
+  const { allVideos, subscriptions, toggleSubscription } = useStore()
   const [tab, setTab] = useState<Tab>('Home')
 
   const channel = ALL_CHANNEL_MAP[channelId]
@@ -33,7 +27,7 @@ export default function ChannelPage({ onCreate }: { onCreate: () => void }) {
 
   if (!channel) return <NotFoundPage />
 
-  const videos = channelId === 'you' ? userVideos : allVideos.filter((video) => video.channelId === channelId)
+  const videos = allVideos.filter((video) => video.channelId === channelId)
   const isSubscribed = subscriptions.includes(channel.id)
   const isOwn = channel.id === 'you'
   const banner = BANNERS[channel.id] ?? 'from-brand-500 to-brand-700'
@@ -63,7 +57,7 @@ export default function ChannelPage({ onCreate }: { onCreate: () => void }) {
           </p>
           <p className="mt-1 line-clamp-1 max-w-xl text-[13px] text-muted">
             {isOwn
-              ? 'Your personal GridWatch channel. Add videos by pasting a link — nothing is uploaded or stored.'
+              ? 'Your personal AfterDark channel. Add videos by pasting a link — nothing is uploaded or stored.'
               : `Welcome to ${channel.name}. New videos every week — subscribe so you never miss one.`}
           </p>
         </div>
@@ -115,7 +109,7 @@ export default function ChannelPage({ onCreate }: { onCreate: () => void }) {
             <h2 className="text-[18px] font-bold">About {channel.name}</h2>
             <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
               {isOwn
-                ? 'This channel stores only the links you add — video files stay on the platform you pasted them from. Everything is saved locally in your browser while GridWatch is running without a database.'
+                ? 'This channel stores only the links you add — video files stay on the platform you pasted them from. Everything is saved locally in your browser while AfterDark is running without a database.'
                 : `${channel.name} brings you ${videos.length > 0 ? 'carefully produced videos' : 'new videos'} across ${[...new Set(videos.map((video) => video.category))].join(', ') || 'a range of topics'}. Subscribe for new uploads, and check the community tab for updates.`}
             </p>
             <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">

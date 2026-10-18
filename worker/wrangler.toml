@@ -1,0 +1,12 @@
+# Optional CLI deployment for worker.js (`npx wrangler deploy` from this folder).
+# The setup guide (docs/telegram-bot-setup.md) uses the Cloudflare dashboard
+# instead, which needs no installs. Secrets are never stored here:
+#   npx wrangler secret put BOT_TOKEN
+#   npx wrangler secret put WEBHOOK_SECRET
+name = "afterdark-telegram-bot"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "VIDEOS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

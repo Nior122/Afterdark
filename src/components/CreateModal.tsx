@@ -5,7 +5,7 @@ import { Check, Film, Image as ImageIcon, Link2, Loader2, Plus, X } from 'lucide
 import { AVATARS, CATEGORIES } from '../data/seed'
 import { useEscape } from '../lib/hooks'
 import { useStore } from '../lib/store'
-import { guessThumbnail, parseDuration, resolveSource } from '../lib/video'
+import { fetchTelegramPoster, guessThumbnail, parseDuration, resolveSource, telegramPost } from '../lib/video'
 
 interface CreateModalProps {
   open: boolean
@@ -22,12 +22,14 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
   const [title, setTitle] = useState('')
   const [thumbnail, setThumbnail] = useState('')
   const [duration, setDuration] = useState('')
-  const [category, setCategory] = useState<string>('Tech')
+  const [category, setCategory] = useState<string>('POV')
   const [error, setError] = useState('')
   const [fetching, setFetching] = useState(false)
+  const [fetchedPoster, setFetchedPoster] = useState('')
 
   const source = useMemo(() => resolveSource(videoUrl), [videoUrl])
-  const previewThumb = thumbnail.trim() || source.poster || guessThumbnail(videoUrl) || asset('/thumbnails/placeholder.svg')
+  const previewThumb =
+    thumbnail.trim() || fetchedPoster || source.poster || guessThumbnail(videoUrl) || asset('/thumbnails/placeholder.svg')
 
   useEscape(onClose, open)
 
@@ -46,10 +48,32 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
       setTitle('')
       setThumbnail('')
       setDuration('')
-      setCategory('Tech')
+      setCategory('POV')
       setError('')
+      setFetchedPoster('')
     }
   }, [open])
+
+  /**
+   * Auto-detect the real thumbnail for public Telegram posts: when the pasted
+   * link resolves to a post, look up its poster image and use it for the
+   * preview (and therefore the saved video) unless a custom thumbnail is set.
+   */
+  const telegramPath = useMemo(() => telegramPost(videoUrl)?.postPath ?? null, [videoUrl])
+  useEffect(() => {
+    setFetchedPoster('')
+    if (!open || !telegramPath) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void fetchTelegramPoster(`https://t.me/${telegramPath}`).then((poster) => {
+        if (!cancelled && poster) setFetchedPoster(poster)
+      })
+    }, 500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [open, telegramPath])
 
   /** Best-effort title autofill for YouTube links (no key, no storage). */
   async function lookupMetadata() {
@@ -126,7 +150,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               <h2 id="create-title" className="text-[17px] font-bold tracking-[-0.01em]">
                 Add a video
               </h2>
-              <p className="text-[12.5px] text-muted">Paste a link — no upload or storage needed.</p>
+              <p className="text-[12.5px] text-muted">Paste an adult video link — no upload or storage needed.</p>
             </div>
           </div>
           <button
@@ -164,7 +188,9 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                     ? 'Vimeo link detected'
                     : source.kind === 'file'
                       ? 'Direct video file detected'
-                      : source.kind === 'embed'
+                      : source.kind === 'telegram'
+                        ? 'Public Telegram post detected'
+                        : source.kind === 'embed'
                         ? 'Embeddable player detected'
                         : source.kind === 'page'
                           ? 'External page link'
@@ -188,14 +214,14 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   setError('')
                 }}
                 onBlur={() => void lookupMetadata()}
-                placeholder="https://www.youtube.com/watch?v=… or https://example.com/clip.mp4"
+                placeholder="https://t.me/yourchannel/123 or https://example.com/embed/…"
                 autoFocus
                 spellCheck={false}
                 className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
               <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-                YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
-                play inline in a sandboxed player. Other pages only show a preview.
+                Public Telegram posts, YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
+                play inline. Private Telegram and other page links only show a preview.
               </p>
             </div>
 
@@ -213,7 +239,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   setTitle(event.target.value)
                   setError('')
                 }}
-                placeholder="e.g. Building a silent 4K editing rig"
+                placeholder="e.g. Amateur POV homemade video"
                 className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
             </div>
@@ -285,7 +311,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               </button>
               <button
                 type="submit"
-                className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(109,40,217,0.9)] transition hover:brightness-105 active:scale-[0.98]"
+                className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(190,18,60,0.9)] transition hover:brightness-105 active:scale-[0.98]"
               >
                 <Plus size={17} strokeWidth={2.6} />
                 Add video
