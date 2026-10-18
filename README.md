@@ -95,7 +95,7 @@ Pages sub-paths, with zero rewrite configuration.
 
 1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**
 2. Merge this work into `main` (or run the workflow manually from the Actions tab)
-3. The site appears at `https://<user>.github.io/Faceverify/`
+3. The site appears at `https://<user>.github.io/<repo>/`
 
 ### Vercel
 
