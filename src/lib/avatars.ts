@@ -30,7 +30,7 @@ import { asset } from './asset'
  * actually exist resolves to a 404, which components catch with `onError` and
  * swap for the generated fallback below.
  */
-const UPLOADER_AVATAR_COUNT = 53
+const UPLOADER_AVATAR_COUNT = 63
 
 /** Resolved through `asset()` so the pool also works from a GitHub Pages sub-path. */
 export const UPLOADER_AVATARS: readonly string[] = Array.from(

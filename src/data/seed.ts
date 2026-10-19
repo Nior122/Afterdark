@@ -56,60 +56,115 @@ export interface Ad extends Video {
  * Telegram-fed listings all carry a byline. Attribution is a pure hash of the
  * video id: stable across reloads, identical on every device, nothing stored.
  *
+ * The roster carries four channels per category, but only as many as there are
+ * faces for go live — see `selectChannelRoster`. That coupling is the whole
+ * point: growing `UPLOADER_AVATAR_COUNT` grows the uploader roster with it, and
+ * it is structurally impossible to end up with two channels sharing a face.
+ *
  * A channel is a navigation target (`/channel/:id`, see `channelPath` and
  * `pages/ChannelPage.tsx`) — but there are still no visitor accounts.
  */
 const CHANNEL_ROSTER: ReadonlyArray<readonly [name: string, category: string]> = [
   ['POV Central', 'POV'],
   ['Her Lens POV', 'POV'],
+  ['Lens Loaded POV', 'POV'],
+  ['First Person Files', 'POV'],
   ['Amateur Diaries', 'Amateur'],
   ['Candid Home Tapes', 'Amateur'],
+  ['Backyard Amateur', 'Amateur'],
+  ['Unpolished Tapes', 'Amateur'],
   ['MILF Manor', 'MILF'],
   ['Experienced Files', 'MILF'],
+  ['Silver Fox Society', 'MILF'],
+  ['MILF After Hours', 'MILF'],
   ['Close-Up Club', 'Blowjob'],
   ['Lipstick Lounge', 'Blowjob'],
+  ['Slow Build Files', 'Blowjob'],
+  ['Mouthwork Monthly', 'Blowjob'],
   ['Heavy Curves TV', 'Big Tits'],
   ['Busty Selects', 'Big Tits'],
+  ['Front Row Curves', 'Big Tits'],
+  ['Heavy Set Hour', 'Big Tits'],
   ['Bounce Room', 'Big Ass'],
   ['Backrow Files', 'Big Ass'],
+  ['Low Angle Files', 'Big Ass'],
+  ['Whiplash Room', 'Big Ass'],
   ['Latina Heat', 'Latina'],
   ['Fuego Amateur', 'Latina'],
+  ['Caliente Selects', 'Latina'],
+  ['Prima Vera POV', 'Latina'],
   ['Dark Hair Daily', 'Brunette'],
   ['Brunette Files', 'Brunette'],
+  ['Espresso Files', 'Brunette'],
+  ['Quiet Brunette', 'Brunette'],
   ['Star Billing', 'Pornstar'],
   ['Featured Performers', 'Pornstar'],
+  ['Marquee Names', 'Pornstar'],
+  ['Contract Stars Archive', 'Pornstar'],
   ['Hardcore Hub', 'Hardcore'],
   ['No Limits Club', 'Hardcore'],
+  ['Raw Deal Files', 'Hardcore'],
+  ['Full Send Club', 'Hardcore'],
   ['Back Door Bureau', 'Anal'],
   ['Prep and Progress', 'Anal'],
+  ['Slow Open Files', 'Anal'],
+  ['Diligent Prep', 'Anal'],
   ['Kitchen Table Tapes', 'Homemade'],
   ['Bedroom Archive', 'Homemade'],
+  ['Phone Camera Club', 'Homemade'],
+  ['Off Season Tapes', 'Homemade'],
   ['Mature Attraction', 'Mature'],
   ['Forty Plus Club', 'Mature'],
+  ['Seasoned Selections', 'Mature'],
+  ['Later In Life', 'Mature'],
   ['Bigger in Person', 'Big Dick'],
   ['Size Matters Files', 'Big Dick'],
+  ['Measured Files', 'Big Dick'],
+  ['Heavy Traffic POV', 'Big Dick'],
   ['Finish Line Clips', 'Cumshot'],
   ['Last Frame Files', 'Cumshot'],
+  ['Final Frame Club', 'Cumshot'],
+  ['Overflow Tapes', 'Cumshot'],
   ['Filled Up Files', 'Creampie'],
   ['Inside Job Amateur', 'Creampie'],
+  ['Left Inside Files', 'Creampie'],
+  ['Warm Room Tapes', 'Creampie'],
   ['Three Deep', 'Threesome'],
   ['Third Person POV', 'Threesome'],
+  ['Odd Number Files', 'Threesome'],
+  ['Pair Plus One', 'Threesome'],
   ['Girl on Girl', 'Lesbian'],
   ['Two Women Files', 'Lesbian'],
+  ['Soft Light Girls', 'Lesbian'],
+  ['Her Place Files', 'Lesbian'],
   ['Ebony Elite', 'Ebony'],
   ['Melanin Motion', 'Ebony'],
+  ['Onyx Hour', 'Ebony'],
+  ['Obsidian Selects', 'Ebony'],
   ['Mixed Company', 'Interracial'],
   ['Cross Over Club', 'Interracial'],
+  ['Mixed Signals Files', 'Interracial'],
+  ['Blended Lines', 'Interracial'],
   ['Hotwife Handbook', 'Hotwife'],
   ['Shared Keys', 'Hotwife'],
+  ['Shared Key Files', 'Hotwife'],
+  ['Tuesday Night Arrangements', 'Hotwife'],
   ['Cam Room Replay', 'Webcam'],
   ['Late Night Cams', 'Webcam'],
+  ['Tip Jar Tapes', 'Webcam'],
+  ['Two AM Streams', 'Webcam'],
   ['Whisper Hours', 'ASMR'],
   ['Soft Spoken Files', 'ASMR'],
+  ['Ear To Ear Files', 'ASMR'],
+  ['Breath And Whisper', 'ASMR'],
   ['Drawer of Toys', 'Toys'],
   ['Vibe and Click', 'Toys'],
+  ['Speed Dial Files', 'Toys'],
+  ['Hands Off Club', 'Toys'],
   ['Ultra HD House', '4K Ultra HD'],
   ['Sixty Frames', '4K Ultra HD'],
+  ['Pixel Perfect House', '4K Ultra HD'],
+  ['Crisp Cuts 4K', '4K Ultra HD'],
 ]
 
 /** `POV Central` -> `pov-central`. Names are unique, so derived ids are too. */
@@ -142,7 +197,38 @@ function fakeAudience(id: string): { subscribers: string; value: number } {
 /** Channels at or above this follower count carry the verified tick. */
 const VERIFIED_AT = 50_000
 
-export const CHANNELS: Channel[] = CHANNEL_ROSTER.map(([name, category], index) => {
+/** Hard ceiling on channels per category, however many faces exist. */
+const CHANNELS_PER_CATEGORY_MAX = 4
+
+const ROSTER_BY_CATEGORY = CHANNEL_ROSTER.reduce(
+  (acc, entry) => {
+    ;(acc[entry[1]] ??= []).push(entry)
+    return acc
+  },
+  {} as Record<string, Array<readonly [string, string]>>,
+)
+
+/**
+ * The live slice of the roster: every category gets the same number of
+ * channels, as large as the avatar pool can fund without any two channels
+ * sharing a face, clamped to 1..4. With 63 faces that is two per category;
+ * at 75 it becomes three and at 100 the full four, with no code change.
+ *
+ * Note the side effect of crossing a boundary: a category going from two live
+ * channels to three re-shuffles which channel each video hashes onto, so a few
+ * listings move between sibling channels in the same category.
+ */
+export function selectChannelRoster(
+  poolSize: number,
+  maxPerCategory: number = CHANNELS_PER_CATEGORY_MAX,
+): Array<readonly [string, string]> {
+  const categories = Object.keys(ROSTER_BY_CATEGORY).length
+  const perCategory = Math.max(1, Math.min(maxPerCategory, Math.floor(Math.max(poolSize, 1) / categories)))
+  return Object.values(ROSTER_BY_CATEGORY).flatMap((list) => list.slice(0, perCategory))
+}
+
+export const CHANNELS: Channel[] = selectChannelRoster(UPLOADER_AVATARS.length).map(
+  ([name, category], index) => {
   const id = slugify(name)
   const audience = fakeAudience(id)
   return {
@@ -158,7 +244,8 @@ export const CHANNELS: Channel[] = CHANNEL_ROSTER.map(([name, category], index) 
     verified: audience.value >= VERIFIED_AT,
     subscribers: audience.subscribers,
   }
-})
+},
+)
 
 export const CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
   CHANNELS.map((c) => [c.id, c]),

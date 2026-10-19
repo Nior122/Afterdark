@@ -121,9 +121,14 @@ src/
   also carries a theme toggle, since it is the first screen visitors see.
 - **Channels = uploaders.** Every listing is attributed to a channel, and a channel
   *is* the uploader: a name, one face from the avatar pool, a verified flag and a
-  **fake** subscriber count. `src/data/seed.ts` carries a 50-entry roster, two channels
-  per browse category (`POV Central` / `Her Lens POV` for POV, `MILF Manor` /
-  `Experienced Files` for MILF, and so on). `channelForVideo(video)` in
+  **fake** subscriber count. `src/data/seed.ts` carries a roster of **100** names, four per
+  browse category (`POV Central` / `Her Lens POV` / `Lens Loaded POV` / `First Person Files`
+  for POV), and `selectChannelRoster(poolSize)` keeps live only as many as the avatar pool
+  can fund without two channels sharing a face: 2 per category from 50 faces, 3 from 75, all 4
+  from 100. The pool is therefore the single dial — raising `UPLOADER_AVATAR_COUNT` grows the
+  uploader roster with it, and a pool too small for the next tier keeps the current tier instead
+  of duplicating faces. Crossing a tier does re-shuffle which sibling channel a video hashes
+  onto (same category, different uploader). `channelForVideo(video)` in
   `src/lib/uploader.ts` does the assignment: an explicitly attributed video keeps its
   channel, while uploads and Telegram imports (`channelId: ''`) are placed on one of the
   channels that publish in *their own category*, chosen by hashing the video id. So a POV
@@ -139,14 +144,15 @@ src/
   clicking any uploader name or face, plus the sidebar subscriptions, the subscriptions rail
   and search results — listing every video attributed to it (`videosForChannel`). There are
   still no visitor accounts.
-  To rename or re-scope a channel, edit the roster — ids are slugs of the names, and
-  `pov-central` is the one id the code special-cases.
+  To rename or re-scope a channel, edit `CHANNEL_ROSTER` — ids are slugs of the names, and
+  `pov-central` is the one id the code special-cases. Names beyond the live tier stay dormant
+  until the pool is big enough for them.
 
 - **Uploader avatars.** Every video shows a distinct avatar in the feed, the row list
-  and the watch page. The pool is `public/avatars/uploader-01.jpg` … `uploader-53.jpg`:
+  and the watch page. The pool is `public/avatars/uploader-01.jpg` … `uploader-63.jpg`:
   **AI-generated synthetic portraits** — they are not photographs of any real person, and no
   real likeness is attached to any listing. They are clothed, non-sexual headshots of adult
-  women, sized 192×192 (~5–9 kB each, 480 kB for all 53) because they render at 20–40 px.
+  women, sized 192×192 (~5–9 kB each, 572 kB for all 63) because they render at 20–40 px.
   `avatarFor(video.id)` hashes the id into the pool, so uploads acquire an avatar automatically
   with no configuration and the same video always shows the same face on every device.
   Seeded catalogue entries pin an explicit `avatar` in `data/seed.ts` so the demo feed shows
