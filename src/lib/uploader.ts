@@ -1,6 +1,6 @@
 import {
   ALL_CHANNEL_MAP,
-  channelsForCategory,
+  ALL_CHANNELS,
   type Channel,
   type Video,
 } from '../data/seed'
@@ -14,18 +14,16 @@ export type Listing = Pick<Video, 'id' | 'channelId' | 'category'> & Partial<Pic
  *
  * An explicitly attributed video keeps whatever it was given. Everything else
  * (visitor uploads and Telegram imports both store `channelId: ''`) is placed
- * on one of the channels that publish in the video's own category, chosen by
- * hashing the video id. That makes the pairing stable across reloads and equal
- * on every device without persisting anything, and it keeps a POV upload on a
- * POV channel rather than scattering it.
+ * on one of the channels in the live roster, chosen by hashing the video id
+ * over the whole pool. That makes the pairing stable across reloads and equal
+ * on every device without persisting anything, and spreads uploads evenly
+ * across every channel instead of concentrating them on the two that match a
+ * single category.
  */
 export function channelForVideo(video: Listing): Channel {
   const explicit = video.channelId ? ALL_CHANNEL_MAP[video.channelId] : undefined
   if (explicit) return explicit
-  const pool = channelsForCategory(video.category)
-  return pool.length > 0
-    ? pool[hashString(video.id || 'afterdark') % pool.length]
-    : pool[0]!
+  return ALL_CHANNELS[hashString(video.id || 'afterdark') % ALL_CHANNELS.length]!
 }
 
 /**

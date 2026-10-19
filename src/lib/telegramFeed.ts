@@ -1,5 +1,7 @@
 import { CATEGORIES, type Video } from '../data/seed'
 import { asset } from './asset'
+import { channelForVideo } from './uploader'
+import { deriveViews } from './stats'
 import { timeAgo } from './video'
 
 /**
@@ -41,17 +43,23 @@ function formatDurationSec(totalSec?: number): string {
 }
 
 function mapFeedVideo(v: FeedVideo): Video {
-  const category =
+  const declaredCategory =
     v.category && v.category !== 'All' && (CATEGORIES as readonly string[]).includes(v.category)
       ? v.category
-      : 'Homemade'
+      : undefined
   const duration = formatDurationSec(v.durationSec)
+  // When the bot did not tag a category, inherit the assigned channel's niche
+  // so the listing lands in the right browse row. channelForVideo is a pure
+  // hash of the id, so this is stable across reloads.
+  const category =
+    declaredCategory ??
+    channelForVideo({ id: v.id, channelId: '', category: '' }).category
   return {
     id: v.id,
     title: v.title?.trim() || 'Telegram video',
     thumbnail: v.thumbUrl || asset('/thumbnails/placeholder.svg'),
     duration,
-    views: '0 views',
+    views: deriveViews(v.id, v.createdAt),
     publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
     channelId: '',
     category,

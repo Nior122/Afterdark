@@ -18,6 +18,7 @@ import {
   type Video,
 } from '../data/seed'
 import { fetchTelegramFeed } from './telegramFeed'
+import { deriveViews } from './stats'
 import { guessThumbnail, resolveSource } from './video'
 
 export interface NewVideoInput {
@@ -156,8 +157,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addVideo = useCallback((input: NewVideoInput) => {
     const source = resolveSource(input.videoUrl)
+    const id = `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
     const video: Video = {
-      id: `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      id,
       title: input.title.trim() || 'Untitled video',
       videoUrl: input.videoUrl.trim(),
       thumbnail:
@@ -166,7 +168,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         guessThumbnail(input.videoUrl) ||
         asset("/thumbnails/placeholder.svg"),
       duration: input.duration?.trim() || '—',
-      views: '0 views',
+      views: deriveViews(id),
       publishedAt: 'Just now',
       channelId: input.channelId,
       category: input.category,
