@@ -3,7 +3,8 @@ import { Search, UserPlus, Check } from 'lucide-react'
 import PageHeading from '../components/PageHeading'
 import VideoRow from '../components/VideoRow'
 import EmptyState from '../components/EmptyState'
-import { CHANNELS } from '../data/seed'
+import { channelForVideo } from '../lib/uploader'
+import { CHANNELS, channelPath } from '../data/seed'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 
@@ -16,7 +17,7 @@ export default function ResultsPage() {
   const needle = query.toLowerCase()
   const results = [...allVideos, ...ads].filter((video) => {
     if (!needle) return false
-    const channelName = CHANNELS.find((channel) => channel.id === video.channelId)?.name ?? ''
+    const channelName = channelForVideo(video).name
     return (
       video.title.toLowerCase().includes(needle) ||
       channelName.toLowerCase().includes(needle) ||
@@ -29,8 +30,8 @@ export default function ResultsPage() {
   const channelResults = needle
     ? CHANNELS.filter(
         (channel) =>
-          channel.id !== 'you' &&
-          (channel.name.toLowerCase().includes(needle) || channel.name.toLowerCase().replace(/\s/g, '').includes(needle)),
+          channel.name.toLowerCase().includes(needle) ||
+          channel.name.toLowerCase().replace(/\s/g, '').includes(needle),
       )
     : []
 
@@ -70,11 +71,14 @@ export default function ResultsPage() {
               const isSubscribed = subscriptions.includes(channel.id)
               return (
                 <div key={channel.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-                  <Link to={`/channel/${channel.id}`}>
-                    <img src={channel.avatar} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  <Link to={channelPath(channel.id)} className="shrink-0" aria-label={`${channel.name} channel`}>
+                    <img src={channel.avatar} alt="" className="block h-12 w-12 rounded-full object-cover" />
                   </Link>
                   <div className="min-w-0 flex-1">
-                    <Link to={`/channel/${channel.id}`} className="block truncate text-[14.5px] font-semibold hover:text-brand-700">
+                    <Link
+                      to={channelPath(channel.id)}
+                      className="block truncate text-[14.5px] font-semibold hover:text-brand-700 hover:underline"
+                    >
                       {channel.name}
                     </Link>
                     <p className="text-[12.5px] text-muted">{channel.subscribers} subscribers</p>
@@ -84,7 +88,7 @@ export default function ResultsPage() {
                     onClick={() => toggleSubscription(channel.id)}
                     className={[
                       'flex h-9 items-center gap-1.5 rounded-full px-4 text-[12.5px] font-semibold transition',
-                      isSubscribed ? 'bg-[#f2f2f4] text-ink' : 'bg-ink text-white hover:bg-black',
+                      isSubscribed ? 'bg-raise text-ink' : 'bg-action text-on-action hover:opacity-90',
                     ].join(' ')}
                   >
                     {isSubscribed ? <><Check size={14} /> Subscribed</> : <><UserPlus size={14} /> Subscribe</>}

@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom'
 import { BadgeCheck } from 'lucide-react'
 import type { Ad, Video } from '../data/seed'
-import { ALL_CHANNEL_MAP } from '../data/seed'
+import { channelForVideo, faceForVideo } from '../lib/uploader'
+import { channelPath } from '../data/seed'
+import { avatarFallbackFor } from '../lib/avatars'
 import KebabMenu from './KebabMenu'
 
 type FeedItem = Video | Ad
@@ -13,14 +15,14 @@ interface VideoRowProps {
 }
 
 export default function VideoRow({ video, description, compact = false }: VideoRowProps) {
-  const channel = ALL_CHANNEL_MAP[video.channelId]
+  const channel = channelForVideo(video)
   const isAd = 'isAd' in video && video.isAd
 
   return (
     <div className={`group/row flex gap-3 ${compact ? '' : 'gap-4'}`}>
       <Link
         to={`/watch/${video.id}`}
-        className={`relative shrink-0 overflow-hidden rounded-xl bg-[#f2f2f4] ${
+        className={`relative shrink-0 overflow-hidden rounded-xl bg-raise ${
           compact ? 'w-[168px]' : 'w-[240px] sm:w-[320px]'
         }`}
         style={{ aspectRatio: '16 / 9' }}
@@ -54,23 +56,34 @@ export default function VideoRow({ video, description, compact = false }: VideoR
               {video.title}
             </Link>
 
-            <p className={`mt-1 flex flex-wrap items-center gap-x-1.5 text-[#606060] ${compact ? 'text-[12px]' : 'text-[13px]'}`}>
+            <p className={`mt-1 flex flex-wrap items-center gap-x-1.5 text-muted ${compact ? 'text-[12px]' : 'text-[13px]'}`}>
               <span>{video.views}</span>
               <span aria-hidden="true">·</span>
               <span>{video.publishedAt}</span>
             </p>
 
-            <Link
-              to={`/channel/${video.channelId}`}
-              className={`mt-1 flex items-center gap-1.5 text-[#606060] hover:text-ink ${compact ? 'text-[12px]' : 'text-[13px]'}`}
+            <div
+              className={`mt-1 flex items-center gap-1.5 text-muted ${compact ? 'text-[12px]' : 'text-[13px]'}`}
             >
-              <img src={channel?.avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
-              <span className="truncate">{channel?.name}</span>
-              {channel?.verified && <BadgeCheck size={13} className="shrink-0 text-[#8a8a92]" />}
-            </Link>
+              <Link to={channelPath(channel.id)} className="shrink-0" aria-label={`More from ${channel.name}`}>
+                <img
+                  src={faceForVideo(video)}
+                  alt=""
+                  className="block h-5 w-5 rounded-full"
+                  onError={(event) => {
+                    event.currentTarget.src = avatarFallbackFor(video)
+                  }}
+                />
+              </Link>
+              <Link to={channelPath(channel.id)} className="truncate hover:text-ink hover:underline">
+                {channel.name}
+              </Link>
+              <span className="shrink-0 text-faint">· {channel.subscribers}</span>
+              {channel.verified && <BadgeCheck size={13} className="shrink-0 text-faint" />}
+            </div>
 
             {description && !compact && (
-              <p className="mt-2 line-clamp-2 max-w-[560px] text-[13px] leading-relaxed text-[#606060]">
+              <p className="mt-2 line-clamp-2 max-w-[560px] text-[13px] leading-relaxed text-muted">
                 {description}
               </p>
             )}

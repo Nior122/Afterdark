@@ -20,7 +20,7 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react'
-import { ALL_CHANNEL_MAP, browsePath } from '../data/seed'
+import { ALL_CHANNEL_MAP, browsePath, channelPath } from '../data/seed'
 import { useStore } from '../lib/store'
 
 interface SidebarProps {
@@ -60,7 +60,7 @@ function itemClasses(active: boolean) {
     'flex h-10 items-center gap-3 rounded-[10px] px-3 text-[13px] transition-colors',
     active
       ? 'bg-brand-100 font-semibold text-ink'
-      : 'font-medium text-[#1f1f1f] hover:bg-[#f2f2f4]',
+      : 'font-medium text-body hover:bg-raise',
   ].join(' ')
 }
 
@@ -70,7 +70,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const subscribedChannels = subscriptions
     .map((id) => ALL_CHANNEL_MAP[id])
-    .filter((channel) => channel && channel.id !== 'you')
+    .filter((channel): channel is NonNullable<typeof channel> => Boolean(channel))
 
   const visibleSubs = showAllSubs ? subscribedChannels : subscribedChannels.slice(0, VISIBLE_SUBS)
 
@@ -87,7 +87,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
       <aside
         className={[
-          'fixed bottom-0 left-0 top-16 z-40 w-[192px] overflow-y-auto border-r border-[#f2f2f4] bg-white px-3 pb-10 pt-2 no-scrollbar transition-transform duration-200 lg:translate-x-0',
+          'fixed bottom-0 left-0 top-16 z-40 w-[192px] overflow-y-auto border-r border-line bg-surface px-3 pb-10 pt-2 no-scrollbar transition-transform duration-200 lg:translate-x-0',
           open ? 'translate-x-0 shadow-[20px_0_50px_-30px_rgba(0,0,0,0.35)]' : '-translate-x-full',
         ].join(' ')}
       >
@@ -99,7 +99,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   <Icon
                     size={20}
                     strokeWidth={isActive ? 2.1 : 1.8}
-                    className={isActive ? 'text-brand-600' : 'text-[#262626]'}
+                    className={isActive ? 'text-brand-600' : 'text-body'}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
                 </>
@@ -108,7 +108,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <hr className="mx-1 my-3 border-[#ececee]" />
+        <hr className="mx-1 my-3 border-line" />
 
         <p className="px-3 pb-1 pt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
           Categories
@@ -126,7 +126,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   <Icon
                     size={20}
                     strokeWidth={isActive ? 2.1 : 1.8}
-                    className={isActive ? 'text-brand-600' : 'text-[#262626]'}
+                    className={isActive ? 'text-brand-600' : 'text-body'}
                   />
                   <span className="min-w-0 flex-1 truncate">{category}</span>
                 </>
@@ -135,7 +135,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <hr className="mx-1 my-3 border-[#ececee]" />
+        <hr className="mx-1 my-3 border-line" />
 
         <nav className="flex flex-col gap-0.5">
           {MORE_LINKS.map(({ to, label, icon: Icon }) => (
@@ -145,11 +145,11 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   <Icon
                     size={20}
                     strokeWidth={isActive ? 2.1 : 1.8}
-                    className={isActive ? 'text-brand-600' : 'text-[#262626]'}
+                    className={isActive ? 'text-brand-600' : 'text-body'}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
                   {label === 'Watch Later' && watchLater.length > 0 && (
-                    <span className="ml-auto shrink-0 rounded-full bg-[#f2f2f4] px-1.5 py-0.5 text-[10.5px] font-medium text-[#606060]">
+                    <span className="ml-auto shrink-0 rounded-full bg-raise px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
                       {watchLater.length}
                     </span>
                   )}
@@ -159,7 +159,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <hr className="mx-1 my-3 border-[#ececee]" />
+        <hr className="mx-1 my-3 border-line" />
 
         <div className="flex h-10 items-center justify-between rounded-[10px] px-3">
           <Link
@@ -178,9 +178,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           {visibleSubs.map((channel) => (
             <Link
               key={channel.id}
-              to={`/channel/${channel.id}`}
+              to={channelPath(channel.id)}
               onClick={onClose}
-              className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[13px] font-medium text-[#1f1f1f] transition hover:bg-[#f2f2f4]"
+              className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[13px] font-medium text-body transition-colors hover:bg-raise"
             >
               <img src={channel.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
               <span className="min-w-0 flex-1 truncate">{channel.name}</span>
@@ -198,24 +198,24 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           <button
             type="button"
             onClick={() => setShowAllSubs((value) => !value)}
-            className="mt-1 flex h-10 w-full items-center gap-5 rounded-[10px] px-3 text-[13px] font-medium text-[#1f1f1f] transition hover:bg-[#f2f2f4]"
+            className="mt-1 flex h-10 w-full items-center gap-5 rounded-[10px] px-3 text-[13px] font-medium text-body transition hover:bg-raise"
           >
             <ChevronDown
               size={20}
               strokeWidth={1.8}
-              className={`text-[#262626] transition-transform ${showAllSubs ? 'rotate-180' : ''}`}
+              className={`text-body transition-transform ${showAllSubs ? 'rotate-180' : ''}`}
             />
             {showAllSubs ? 'Show less' : 'Show more'}
           </button>
         )}
 
-        <div className="mt-5 border-t border-[#ececee] px-3 pt-4">
-          <p className="text-[11px] leading-[1.9] text-[#909090]">
+        <div className="mt-5 border-t border-line px-3 pt-4">
+          <p className="text-[11px] leading-[1.9] text-faint">
             18+ only · Terms · Privacy · DMCA
             <br />
             Content removal · Contact
             <br />
-            <span className="mt-2 inline-block text-[11px] text-[#a3a3a3]">© 2026 AfterDark</span>
+            <span className="mt-2 inline-block text-[11px] text-faint">© 2026 AfterDark</span>
           </p>
         </div>
       </aside>

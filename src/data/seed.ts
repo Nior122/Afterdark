@@ -1,10 +1,13 @@
-import { asset } from '../lib/asset'
+import { avatarFor, hashString, UPLOADER_AVATARS } from '../lib/avatars'
 export interface Channel {
   id: string
   name: string
   avatar: string
   verified: boolean
+  /** Display-only fake audience size, pre-formatted ("12.4K"). Not real. */
   subscribers: string
+  /** The single browse category this channel publishes into. */
+  category: string
 }
 
 export interface Video {
@@ -28,6 +31,12 @@ export interface Video {
    * raw source URL, so viewers cannot click through to the original site.
    */
   protectedEmbed?: boolean
+  /**
+   * Explicit uploader face, overriding channel attribution. Normally unset: the
+   * avatar comes from the video's channel (see `lib/uploader.ts`), which falls
+   * back to a pool hash of the video id when no channel resolves.
+   */
+  avatar?: string
   isAd?: boolean
   adHeadline?: string
 }
@@ -39,14 +48,117 @@ export interface Ad extends Video {
   adHeadline: string
 }
 
-export const AVATARS = {
-  user: asset("/avatars/user.jpg"),
-} as const
-
-export const CHANNELS: Channel[] = [
-  { id: 'pov-central', name: 'POV Central', avatar: asset("/avatars/pulse.svg"), verified: true, subscribers: '8.4K' },
-  { id: 'you', name: 'You', avatar: AVATARS.user, verified: false, subscribers: '0' },
+/**
+ * Channels are the uploader identities of this catalogue. Each one owns a face
+ * from the avatar pool, a fake subscriber count and exactly one browse
+ * category; every video is attributed to one of the channels that publish in
+ * its own category (see `lib/uploader.ts`), so seeded, link-imported and
+ * Telegram-fed listings all carry a byline. Attribution is a pure hash of the
+ * video id: stable across reloads, identical on every device, nothing stored.
+ *
+ * A channel is a navigation target (`/channel/:id`, see `channelPath` and
+ * `pages/ChannelPage.tsx`) — but there are still no visitor accounts.
+ */
+const CHANNEL_ROSTER: ReadonlyArray<readonly [name: string, category: string]> = [
+  ['POV Central', 'POV'],
+  ['Her Lens POV', 'POV'],
+  ['Amateur Diaries', 'Amateur'],
+  ['Candid Home Tapes', 'Amateur'],
+  ['MILF Manor', 'MILF'],
+  ['Experienced Files', 'MILF'],
+  ['Close-Up Club', 'Blowjob'],
+  ['Lipstick Lounge', 'Blowjob'],
+  ['Heavy Curves TV', 'Big Tits'],
+  ['Busty Selects', 'Big Tits'],
+  ['Bounce Room', 'Big Ass'],
+  ['Backrow Files', 'Big Ass'],
+  ['Latina Heat', 'Latina'],
+  ['Fuego Amateur', 'Latina'],
+  ['Dark Hair Daily', 'Brunette'],
+  ['Brunette Files', 'Brunette'],
+  ['Star Billing', 'Pornstar'],
+  ['Featured Performers', 'Pornstar'],
+  ['Hardcore Hub', 'Hardcore'],
+  ['No Limits Club', 'Hardcore'],
+  ['Back Door Bureau', 'Anal'],
+  ['Prep and Progress', 'Anal'],
+  ['Kitchen Table Tapes', 'Homemade'],
+  ['Bedroom Archive', 'Homemade'],
+  ['Mature Attraction', 'Mature'],
+  ['Forty Plus Club', 'Mature'],
+  ['Bigger in Person', 'Big Dick'],
+  ['Size Matters Files', 'Big Dick'],
+  ['Finish Line Clips', 'Cumshot'],
+  ['Last Frame Files', 'Cumshot'],
+  ['Filled Up Files', 'Creampie'],
+  ['Inside Job Amateur', 'Creampie'],
+  ['Three Deep', 'Threesome'],
+  ['Third Person POV', 'Threesome'],
+  ['Girl on Girl', 'Lesbian'],
+  ['Two Women Files', 'Lesbian'],
+  ['Ebony Elite', 'Ebony'],
+  ['Melanin Motion', 'Ebony'],
+  ['Mixed Company', 'Interracial'],
+  ['Cross Over Club', 'Interracial'],
+  ['Hotwife Handbook', 'Hotwife'],
+  ['Shared Keys', 'Hotwife'],
+  ['Cam Room Replay', 'Webcam'],
+  ['Late Night Cams', 'Webcam'],
+  ['Whisper Hours', 'ASMR'],
+  ['Soft Spoken Files', 'ASMR'],
+  ['Drawer of Toys', 'Toys'],
+  ['Vibe and Click', 'Toys'],
+  ['Ultra HD House', '4K Ultra HD'],
+  ['Sixty Frames', '4K Ultra HD'],
 ]
+
+/** `POV Central` -> `pov-central`. Names are unique, so derived ids are too. */
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (value >= 1_000)
+    return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0).replace(/\.0$/, '')}K`
+  return String(value)
+}
+
+/**
+ * Fake but plausible audience size, keyed off the channel id so a channel keeps
+ * its number for as long as its name does. Log-uniform from ~2K to ~800K: the
+ * spread keeps small channels the common case, while the floor stops any
+ * listing from showing a three-figure following, which reads as a dead site.
+ */
+function fakeAudience(id: string): { subscribers: string; value: number } {
+  const spread = (hashString(id) >>> 8) % 1000
+  const value = Math.round(10 ** (3.3 + (spread / 1000) * 2.6))
+  return { value, subscribers: formatCount(value) }
+}
+
+/** Channels at or above this follower count carry the verified tick. */
+const VERIFIED_AT = 50_000
+
+export const CHANNELS: Channel[] = CHANNEL_ROSTER.map(([name, category], index) => {
+  const id = slugify(name)
+  const audience = fakeAudience(id)
+  return {
+    id,
+    name,
+    category,
+    // Roster order rather than a hash: the pool is at least as large as the
+    // roster, so each channel gets its own face instead of two colliding.
+    avatar:
+      UPLOADER_AVATARS.length > 0
+        ? UPLOADER_AVATARS[index % UPLOADER_AVATARS.length]
+        : avatarFor(id),
+    verified: audience.value >= VERIFIED_AT,
+    subscribers: audience.subscribers,
+  }
+})
 
 export const CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
   CHANNELS.map((c) => [c.id, c]),
@@ -59,6 +171,24 @@ export const ALL_CHANNELS: Channel[] = [...CHANNELS, ...ADVERTISERS]
 export const ALL_CHANNEL_MAP: Record<string, Channel> = Object.fromEntries(
   ALL_CHANNELS.map((c) => [c.id, c]),
 )
+
+/** Channels grouped by the category they publish into. */
+export const CHANNELS_BY_CATEGORY: Record<string, Channel[]> = CHANNELS.reduce(
+  (acc, channel) => {
+    ;(acc[channel.category] ??= []).push(channel)
+    return acc
+  },
+  {} as Record<string, Channel[]>,
+)
+
+/**
+ * Candidate channels for a video category. An unknown or missing category still
+ * resolves to a real byline rather than none, so a mis-tagged import can never
+ * render an uploader-less card.
+ */
+export function channelsForCategory(category: string): Channel[] {
+  return CHANNELS_BY_CATEGORY[category] ?? ALL_CHANNELS
+}
 
 /** Adult-site category taxonomy. `All` is the home feed, not a video category. */
 export const CATEGORIES = [
@@ -89,6 +219,11 @@ export const CATEGORIES = [
   'Toys',
   '4K Ultra HD',
 ] as const
+
+/** Canonical link to a channel's own page, where its uploads are collected. */
+export function channelPath(channelId: string): string {
+  return `/channel/${encodeURIComponent(channelId)}`
+}
 
 /** Encoded browse route for a category, including names with spaces. */
 export function browsePath(category: string): string {
@@ -127,7 +262,7 @@ export const SEED_VIDEOS: Video[] = [
     duration: '0:54',
     views: '686 views',
     publishedAt: '2 months ago',
-    channelId: 'you',
+    channelId: '',
     category: 'Homemade',
     videoUrl: 'https://t.me/leakedvideospage/2269',
     description: 'Homemade · 0:54.',

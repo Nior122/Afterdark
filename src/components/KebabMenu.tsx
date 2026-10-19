@@ -55,7 +55,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
           event.stopPropagation()
           setOpen((value) => !value)
         }}
-        className="grid h-8 w-8 place-items-center rounded-full text-[#606060] transition hover:bg-[#f2f2f4] hover:text-ink"
+        className="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-raise hover:text-ink"
       >
         <MoreVertical size={18} strokeWidth={2} />
       </button>
@@ -64,7 +64,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
         <div
           role="menu"
           className={[
-            'absolute top-8 z-40 w-[230px] overflow-hidden rounded-xl border border-line bg-white py-1.5 shadow-[0_18px_45px_-12px_rgba(0,0,0,0.3)]',
+            'absolute top-8 z-40 w-[230px] overflow-hidden rounded-xl border border-line bg-surface py-1.5 shadow-[0_18px_45px_-12px_rgba(0,0,0,0.3)] dark:bg-panel dark:shadow-[0_18px_45px_-12px_rgba(0,0,0,0.85)]',
             menuAlign === 'right' ? 'right-0' : 'left-0',
           ].join(' ')}
           onClick={(event) => event.stopPropagation()}
@@ -76,7 +76,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
               toggleWatchLater(videoId)
               close()
             }}
-            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-[#f5f5f7]"
+            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-panel"
           >
             {saved ? <Check size={17} className="text-brand-600" /> : <Clock3 size={17} className="text-muted" />}
             {saved ? 'Remove from Watch later' : 'Save to Watch later'}
@@ -89,7 +89,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
               toggleLike(videoId)
               close()
             }}
-            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-[#f5f5f7]"
+            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-panel"
           >
             <ThumbsUp size={17} className={isLiked ? 'text-brand-600' : 'text-muted'} fill={isLiked ? 'currentColor' : 'none'} />
             {isLiked ? 'Remove like' : 'Like this video'}
@@ -102,7 +102,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
               void share()
               close()
             }}
-            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-[#f5f5f7]"
+            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-panel"
           >
             {copied ? <Check size={17} className="text-emerald-600" /> : <Share2 size={17} className="text-muted" />}
             {copied ? 'Link copied!' : 'Share'}
@@ -115,7 +115,7 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
               navigate(`/watch/${videoId}`)
               close()
             }}
-            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-[#f5f5f7]"
+            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] text-ink hover:bg-panel"
           >
             <ExternalLink size={17} className="text-muted" />
             Open video

@@ -53,7 +53,7 @@ function mapFeedVideo(v: FeedVideo): Video {
     duration,
     views: '0 views',
     publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
-    channelId: 'you',
+    channelId: '',
     category,
     videoUrl: v.streamUrl,
     description: `${category} · ${duration}.`,

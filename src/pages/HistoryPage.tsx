@@ -24,7 +24,7 @@ export default function HistoryPage() {
             <button
               type="button"
               onClick={clearHistory}
-              className="flex h-10 items-center gap-2 rounded-full bg-[#f2f2f4] px-4 text-[13.5px] font-semibold text-ink transition hover:bg-red-50 hover:text-red-600"
+              className="flex h-10 items-center gap-2 rounded-full bg-raise px-4 text-[13.5px] font-semibold text-ink transition hover:bg-red-50 hover:text-red-600"
             >
               <Trash2 size={16} /> Clear all history
             </button>

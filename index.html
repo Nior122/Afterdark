@@ -10,6 +10,24 @@
       content="AfterDark (18+) — adult videos by POV, amateur, MILF, Latina, hardcore and more. Link-only catalogue; videos are added by URL."
     />
     <meta name="rating" content="adult" />
+    <script>
+      // Apply the stored (or OS) theme before first paint so switching to dark
+      // mode never flashes a white page on reload. Keep the key in sync with
+      // -- STORAGE_KEY in src/lib/theme.tsx.
+      (function () {
+        try {
+          var stored = localStorage.getItem('afterdark.theme.v1')
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          /* storage blocked — fall back to the light theme */
+        }
+      })()
+    </script>
     <title>AfterDark — Adult Videos (18+)</title>
   </head>
   <body>

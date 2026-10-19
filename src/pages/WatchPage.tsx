@@ -1,5 +1,4 @@
-import { asset } from '../lib/asset'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Bell,
@@ -8,7 +7,6 @@ import {
   Copy,
   ExternalLink,
   Link2,
-  MessageCircle,
   Play,
   Share2,
   ThumbsDown,
@@ -19,46 +17,12 @@ import KebabMenu from '../components/KebabMenu'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
 import NotFoundPage from './NotFoundPage'
-import { ALL_CHANNEL_MAP, AVATARS, type Ad } from '../data/seed'
+import { channelPath, type Ad } from '../data/seed'
+import { avatarFallbackFor } from '../lib/avatars'
+import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 import { formatCount, resolveSource } from '../lib/video'
-
-interface Comment {
-  id: string
-  name: string
-  avatar: string
-  time: string
-  text: string
-  likes: number
-}
-
-const SEED_COMMENTS: Comment[] = [
-  {
-    id: 'c1',
-    name: 'Jordan Lee',
-    avatar: AVATARS.user,
-    time: '2 days ago',
-    text: 'The POV camera work on this one is perfect. Watched it twice and caught new details the second time around.',
-    likes: 128,
-  },
-  {
-    id: 'c2',
-    name: 'Maya Okafor',
-    avatar: asset("/avatars/pulse.svg"),
-    time: '5 days ago',
-    text: 'This deserves way more views. The production quality is unreal — instantly subscribed.',
-    likes: 84,
-  },
-  {
-    id: 'c3',
-    name: 'Daniel Cruz',
-    avatar: AVATARS.user,
-    time: '1 week ago',
-    text: 'Came for the thumbnail, stayed for the editing. More like this please 🙌',
-    likes: 32,
-  },
-]
 
 function hashString(value: string) {
   let hash = 0
@@ -85,7 +49,7 @@ function ActionPill({
       onClick={onClick}
       className={[
         'flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition',
-        active ? 'bg-brand-100 text-brand-700' : 'bg-[#f2f2f4] text-ink hover:bg-[#e8e8ec]',
+        active ? 'bg-brand-100 text-brand-700' : 'bg-raise text-ink hover:bg-sunken',
       ].join(' ')}
     >
       {icon}
@@ -94,7 +58,7 @@ function ActionPill({
   )
 }
 
-export default function WatchPage({ onCreate }: { onCreate: () => void }) {
+export default function WatchPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const {
@@ -112,7 +76,7 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
   } = useStore()
 
   const video = getVideo(id)
-  const channel = video ? ALL_CHANNEL_MAP[video.channelId] : undefined
+  const channel = video ? channelForVideo(video) : undefined
   const ad = video && 'isAd' in video && video.isAd ? (video as Ad) : null
 
   usePageTitle(video?.title ?? 'Video')
@@ -123,9 +87,6 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
   const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [autoplay, setAutoplay] = useState(true)
-  const [comments, setComments] = useState<Comment[]>(SEED_COMMENTS)
-  const [commentText, setCommentText] = useState('')
-  const [commentFocused, setCommentFocused] = useState(false)
 
   const related = useMemo(() => {
     if (!video) return []
@@ -135,12 +96,14 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
     return [...sameCategory, ...other].slice(0, 10)
   }, [allVideos, ads, video])
 
-  if (!video || !channel) return <NotFoundPage />
+  // Every listing resolves to a channel now, including visitor links, because an
+  // unattributed video is placed on a channel by category (see lib/uploader).
+  if (!video) return <NotFoundPage />
 
   const source = resolveSource(video.videoUrl)
   const saved = watchLater.includes(video.id)
   const isLiked = liked.includes(video.id)
-  const isSubscribed = subscriptions.includes(channel.id)
+  const isSubscribed = channel ? subscriptions.includes(channel.id) : false
   const likeCount = 120 + (hashString(video.id) % 18000)
 
   const description =
@@ -149,9 +112,15 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
       `${video.title} — watch the full video in ${video.category}.`,
       '',
       `Category: ${video.category}`,
-      video.tags?.length ? `Tags: ${video.tags.join(', ')}` : `More from ${channel.name} in this category.`,
+      video.tags?.length
+        ? `Tags: ${video.tags.join(', ')}`
+        : channel
+          ? `More from ${channel.name} in this category.`
+          : `More like this in ${video.category}.`,
       '',
-      `#${video.category.toLowerCase().replace(/[^a-z0-9]/g, '')} #afterdark #${channel.name.toLowerCase()}`,
+      `#${video.category.toLowerCase().replace(/[^a-z0-9]/g, '')} #afterdark${
+        channel ? ` #${channel.name.toLowerCase().replace(/[^a-z0-9]/g, '')}` : ''
+      }`,
     ].join('\n')
 
   async function copyLink() {
@@ -162,18 +131,6 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
     } catch {
       window.prompt('Copy this link', `${window.location.origin}/watch/${video!.id}`)
     }
-  }
-
-  function submitComment(event: FormEvent) {
-    event.preventDefault()
-    const text = commentText.trim()
-    if (!text) return
-    setComments((current) => [
-      { id: `c-${Date.now()}`, name: 'Alex Rivera', avatar: AVATARS.user, time: 'Just now', text, likes: 0 },
-      ...current,
-    ])
-    setCommentText('')
-    setCommentFocused(false)
   }
 
   return (
@@ -250,18 +207,11 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
                       href={video.videoUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex h-9 items-center gap-2 rounded-full bg-white px-4 text-[12.5px] font-semibold text-ink"
+                      className="flex h-9 items-center gap-2 rounded-full bg-white px-4 text-[12.5px] font-semibold text-[#0f0f0f]"
                     >
                       <ExternalLink size={15} /> Open original
                     </a>
                   )}
-                  <button
-                    type="button"
-                    onClick={onCreate}
-                    className="flex h-9 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-4 text-[12.5px] font-semibold text-white"
-                  >
-                    <Link2 size={15} /> Add a video link
-                  </button>
                 </div>
               </div>
             </div>
@@ -274,47 +224,55 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Link to={`/channel/${channel.id}`} className="shrink-0">
-              <img src={channel.avatar} alt={channel.name} className="h-10 w-10 rounded-full object-cover" />
+            <Link
+              to={channel ? channelPath(channel.id) : '#'}
+              className="shrink-0"
+              aria-label={channel ? `More from ${channel.name}` : undefined}
+            >
+              <img
+                src={faceForVideo(video)}
+                alt=""
+                className="block h-10 w-10 rounded-full"
+                onError={(event) => {
+                  event.currentTarget.src = avatarFallbackFor(video)
+                }}
+              />
             </Link>
-            <div className="min-w-0">
-              <Link to={`/channel/${channel.id}`} className="block truncate text-[15px] font-semibold text-ink hover:text-brand-700">
-                {channel.name}
-              </Link>
-              <p className="text-[12px] text-muted">
-                {channel.id === 'you' ? 'Your channel' : `${channel.subscribers} subscribers`}
-              </p>
-            </div>
+            {channel ? (
+              <>
+                <div className="min-w-0">
+                  <Link
+                    to={channelPath(channel.id)}
+                    className="block truncate text-[15px] font-semibold text-ink hover:text-brand-700 hover:underline"
+                  >
+                    {channel.name}
+                  </Link>
+                  <p className="text-[12px] text-muted">{channel.subscribers} subscribers</p>
+                </div>
 
-            {channel.id === 'you' ? (
-              <button
-                type="button"
-                onClick={onCreate}
-                className="ml-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-4 text-[13px] font-semibold text-white transition hover:brightness-105"
-              >
-                Add video
-              </button>
+                <button
+                  type="button"
+                  onClick={() => toggleSubscription(channel.id)}
+                  className={[
+                    'ml-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold transition',
+                    isSubscribed ? 'bg-raise text-ink hover:bg-sunken' : 'bg-action text-on-action hover:opacity-90',
+                  ].join(' ')}
+                >
+                  {isSubscribed ? <><Bell size={15} /> Subscribed</> : 'Subscribe'}
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                onClick={() => toggleSubscription(channel.id)}
-                className={[
-                  'ml-1 flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold transition',
-                  isSubscribed ? 'bg-[#f2f2f4] text-ink hover:bg-[#e8e8ec]' : 'bg-ink text-white hover:bg-black',
-                ].join(' ')}
-              >
-                {isSubscribed ? <><Bell size={15} /> Subscribed</> : 'Subscribe'}
-              </button>
+              <p className="text-[12.5px] text-muted">Added by link · no uploader</p>
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex h-9 items-center overflow-hidden rounded-full bg-[#f2f2f4]">
+            <div className="flex h-9 items-center overflow-hidden rounded-full bg-raise">
               <button
                 type="button"
                 onClick={() => toggleLike(video.id)}
                 className={[
-                  'flex h-9 items-center gap-2 px-3.5 text-[13px] font-semibold transition hover:bg-[#e8e8ec]',
+                  'flex h-9 items-center gap-2 px-3.5 text-[13px] font-semibold transition hover:bg-sunken',
                   isLiked ? 'text-brand-700' : 'text-ink',
                 ].join(' ')}
                 aria-pressed={isLiked}
@@ -322,10 +280,10 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
                 <ThumbsUp size={17} fill={isLiked ? 'currentColor' : 'none'} />
                 {formatCount(likeCount + (isLiked ? 1 : 0))}
               </button>
-              <span className="h-5 w-px bg-[#dcdce1]" />
+              <span className="h-5 w-px bg-sunken" />
               <button
                 type="button"
-                className="flex h-9 items-center px-3.5 text-ink transition hover:bg-[#e8e8ec]"
+                className="flex h-9 items-center px-3.5 text-ink transition hover:bg-sunken"
                 aria-label="Dislike"
               >
                 <ThumbsDown size={17} />
@@ -358,10 +316,10 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl bg-[#f2f2f4] px-3.5 py-3">
+        <div className="mt-4 rounded-xl bg-raise px-3.5 py-3">
           <div className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
             <span>{video.views}</span>
-            <span className="text-[#8a8a92]">·</span>
+            <span className="text-faint">·</span>
             <span>{video.publishedAt}</span>
             {ad && (
               <span className="ml-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10.5px] font-bold uppercase tracking-wide text-white">
@@ -377,7 +335,7 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
           )}
 
           <p
-            className={`mt-2 whitespace-pre-line text-[13px] leading-[1.65] text-[#3f3f46] ${descriptionOpen ? '' : 'line-clamp-3'}`}
+            className={`mt-2 whitespace-pre-line text-[13px] leading-[1.65] text-body ${descriptionOpen ? '' : 'line-clamp-3'}`}
           >
             {description}
           </p>
@@ -388,7 +346,7 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
                 <Link
                   key={tag}
                   to={`/results?q=${encodeURIComponent(tag)}`}
-                  className="rounded-full bg-white px-2.5 py-1 text-[11.5px] font-semibold text-[#3f3f46] ring-1 ring-[#dedee3] transition hover:bg-brand-50 hover:text-brand-700 hover:ring-brand-200"
+                  className="rounded-full bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-body ring-1 ring-line transition hover:bg-brand-50 hover:text-brand-700 hover:ring-brand-200"
                 >
                   {tag}
                 </Link>
@@ -418,78 +376,6 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
             {descriptionOpen ? 'Show less' : '...more'}
           </button>
         </div>
-
-        <section className="mt-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-[17px] font-bold">
-              <MessageCircle size={18} className="text-brand-600" />
-              {comments.length + 21} Comments
-            </h2>
-            <button type="button" className="text-[12.5px] font-semibold text-muted hover:text-ink">
-              Sort by newest
-            </button>
-          </div>
-
-          <form onSubmit={submitComment} className="mt-4 flex items-start gap-3">
-            <img src={AVATARS.user} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-            <div className="min-w-0 flex-1">
-              <input
-                value={commentText}
-                onChange={(event) => setCommentText(event.target.value)}
-                onFocus={() => setCommentFocused(true)}
-                placeholder="Add a comment..."
-                className="w-full border-b border-[#dcdce1] bg-transparent pb-2 text-[13.5px] text-ink placeholder:text-[#8f8f97] focus:border-ink"
-              />
-              {commentFocused && (
-                <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCommentText('')
-                      setCommentFocused(false)
-                    }}
-                    className="h-8 rounded-full px-3 text-[12.5px] font-semibold text-ink hover:bg-[#f2f2f4]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!commentText.trim()}
-                    className="h-8 rounded-full bg-brand-600 px-3.5 text-[12.5px] font-semibold text-white transition enabled:hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-[#e3e3e8] disabled:text-[#9b9ba3]"
-                  >
-                    Comment
-                  </button>
-                </div>
-              )}
-            </div>
-          </form>
-
-          <ul className="mt-6 flex flex-col gap-5">
-            {comments.map((comment) => (
-              <li key={comment.id} className="flex items-start gap-3">
-                <img src={comment.avatar} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-                <div className="min-w-0">
-                  <p className="text-[12.5px] text-ink">
-                    <span className="font-semibold">@{comment.name.toLowerCase().replace(/\s+/g, '')}</span>{' '}
-                    <span className="text-muted">{comment.time}</span>
-                  </p>
-                  <p className="mt-1 text-[13.5px] leading-relaxed text-[#3f3f46]">{comment.text}</p>
-                  <div className="mt-2 flex items-center gap-4 text-[12px] text-muted">
-                    <button type="button" className="flex items-center gap-1.5 font-medium hover:text-ink">
-                      <ThumbsUp size={15} /> {comment.likes > 0 ? formatCount(comment.likes) : ''}
-                    </button>
-                    <button type="button" className="hover:text-ink">
-                      <ThumbsDown size={15} />
-                    </button>
-                    <button type="button" className="font-semibold hover:text-ink">
-                      Reply
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
       </div>
 
       <aside className="w-full shrink-0 rail:w-[352px]">
@@ -502,7 +388,7 @@ export default function WatchPage({ onCreate }: { onCreate: () => void }) {
               role="switch"
               aria-checked={autoplay}
               onClick={() => setAutoplay((value) => !value)}
-              className={`relative h-5 w-9 rounded-full transition ${autoplay ? 'bg-brand-600' : 'bg-[#d4d4d8]'}`}
+              className={`relative h-5 w-9 rounded-full transition ${autoplay ? 'bg-brand-600' : 'bg-faint'}`}
             >
               <span
                 className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${autoplay ? 'left-[18px]' : 'left-0.5'}`}
