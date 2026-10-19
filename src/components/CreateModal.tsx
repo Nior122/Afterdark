@@ -1,8 +1,8 @@
 import { asset } from '../lib/asset'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, Film, Image as ImageIcon, Link2, Loader2, Plus, X } from 'lucide-react'
-import { AVATARS, CATEGORIES } from '../data/seed'
+import { Check, Film, Image as ImageIcon, Link2, Loader2, X } from 'lucide-react'
+import { CATEGORIES } from '../data/seed'
 import { useEscape } from '../lib/hooks'
 import { useStore } from '../lib/store'
 import { fetchTelegramPoster, guessThumbnail, parseDuration, resolveSource, telegramPost } from '../lib/video'
@@ -121,7 +121,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
     const created = addVideo({
       title,
       videoUrl: rawUrl,
-      channelId: 'you',
+      channelId: '',
       category,
       duration: parseDuration(duration) ?? duration.trim() ?? '',
       thumbnail: previewThumb,
@@ -139,24 +139,19 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-title"
-        className="relative z-10 max-h-[92vh] w-full max-w-[600px] overflow-y-auto rounded-t-2xl bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.45)] sm:rounded-2xl"
+        className="relative z-10 max-h-[92vh] w-full max-w-[600px] overflow-y-auto rounded-t-2xl bg-surface shadow-[0_30px_80px_-20px_rgba(0,0,0,0.45)] dark:bg-panel dark:shadow-[0_30px_80px_-20px_rgba(0,0,0,0.85)] sm:rounded-2xl"
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-100 text-brand-700">
-              <Plus size={19} strokeWidth={2.4} />
-            </span>
-            <div>
-              <h2 id="create-title" className="text-[17px] font-bold tracking-[-0.01em]">
-                Add a video
-              </h2>
-              <p className="text-[12.5px] text-muted">Paste an adult video link — no upload or storage needed.</p>
-            </div>
+          <div>
+            <h2 id="create-title" className="text-[17px] font-bold tracking-[-0.01em]">
+              Add a video
+            </h2>
+            <p className="text-[12.5px] text-muted">Paste an adult video link — no upload or storage needed.</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-full text-muted transition hover:bg-[#f2f2f4] hover:text-ink"
+            className="grid h-9 w-9 place-items-center rounded-full text-muted transition hover:bg-raise hover:text-ink"
             aria-label="Close"
           >
             <X size={20} />
@@ -164,8 +159,8 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
         </div>
 
         <form onSubmit={submit} className="px-5 pb-6 pt-5 sm:px-6">
-          <div className="flex gap-3 rounded-xl border border-line bg-[#fafafb] p-3">
-            <div className="relative aspect-video w-[132px] shrink-0 overflow-hidden rounded-lg bg-[#ededf0]">
+          <div className="flex gap-3 rounded-xl border border-line bg-panel p-3">
+            <div className="relative aspect-video w-[132px] shrink-0 overflow-hidden rounded-lg bg-field">
               <img src={previewThumb} alt="" className="h-full w-full object-cover" />
               {duration && (
                 <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 py-[2px] text-[10px] font-semibold text-white">
@@ -177,10 +172,6 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-ink">
                 {title.trim() || 'Your video title appears here'}
               </p>
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <img src={AVATARS.user} alt="" className="h-5 w-5 rounded-full object-cover" />
-                <span className="text-[12px] text-muted">You</span>
-              </div>
               <p className="mt-1.5 text-[11.5px] font-medium text-brand-600">
                 {source.kind === 'youtube'
                   ? 'YouTube link detected'
@@ -217,10 +208,10 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                 placeholder="https://t.me/yourchannel/123 or https://example.com/embed/…"
                 autoFocus
                 spellCheck={false}
-                className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                className="h-11 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-faint transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
               <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-                Public Telegram posts, YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-[#f2f2f4] px-1">/embed/…</code>)
+                Public Telegram posts, YouTube, Vimeo, direct MP4/WebM files and embed links (<code className="rounded bg-raise px-1">/embed/…</code>)
                 play inline. Private Telegram and other page links only show a preview.
               </p>
             </div>
@@ -240,7 +231,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   setError('')
                 }}
                 placeholder="e.g. Amateur POV homemade video"
-                className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                className="h-11 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-faint transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
             </div>
 
@@ -255,7 +246,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                 onChange={(event) => setThumbnail(event.target.value)}
                 placeholder="Leave empty to auto-detect"
                 spellCheck={false}
-                className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                className="h-11 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-faint transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
               />
             </div>
 
@@ -268,7 +259,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   id="video-category"
                   value={category}
                   onChange={(event) => setCategory(event.target.value)}
-                  className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                  className="h-11 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
                 >
                   {CATEGORY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -286,7 +277,7 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
                   value={duration}
                   onChange={(event) => setDuration(event.target.value)}
                   placeholder="8:31"
-                  className="h-11 w-full rounded-lg border border-[#dedee3] bg-white px-3 text-[14px] text-ink placeholder:text-[#9b9ba3] transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                  className="h-11 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-faint transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
                 />
               </div>
             </div>
@@ -305,15 +296,14 @@ export default function CreateModal({ open, onClose }: CreateModalProps) {
               <button
                 type="button"
                 onClick={onClose}
-                className="h-10 rounded-full px-4 text-[13.5px] font-semibold text-ink transition hover:bg-[#f2f2f4]"
+                className="h-10 rounded-full px-4 text-[13.5px] font-semibold text-ink transition hover:bg-raise"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(190,18,60,0.9)] transition hover:brightness-105 active:scale-[0.98]"
+                className="h-10 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 px-5 text-[13.5px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(190,18,60,0.9)] transition hover:brightness-105 active:scale-[0.98]"
               >
-                <Plus size={17} strokeWidth={2.6} />
                 Add video
               </button>
             </div>

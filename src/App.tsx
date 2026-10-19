@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import CreateModal from './components/CreateModal'
 import HomePage from './pages/HomePage'
 import BrowsePage from './pages/BrowsePage'
+import ChannelPage from './pages/ChannelPage'
 import ExplorePage from './pages/ExplorePage'
 import TrendingPage from './pages/TrendingPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
@@ -13,7 +14,6 @@ import HistoryPage from './pages/HistoryPage'
 import WatchLaterPage from './pages/WatchLaterPage'
 import LikedPage from './pages/LikedPage'
 import ResultsPage from './pages/ResultsPage'
-import ChannelPage from './pages/ChannelPage'
 import WatchPage from './pages/WatchPage'
 import NotFoundPage from './pages/NotFoundPage'
 
@@ -35,26 +35,26 @@ export default function App() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-surface">
       <ScrollToTop />
-      <Header onCreate={() => setCreateOpen(true)} onToggleSidebar={() => setSidebarOpen((open) => !open)} />
+      <Header onToggleSidebar={() => setSidebarOpen((open) => !open)} />
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="pt-16 lg:pl-[192px]">
         <main className="px-4 pb-20 sm:px-5 xl:px-6">
           <Routes>
-            <Route path="/" element={<HomePage onCreate={() => setCreateOpen(true)} />} />
+            <Route path="/" element={<HomePage />} />
             <Route path="/browse/:category" element={<BrowsePage />} />
+            <Route path="/channel/:channelId" element={<ChannelPage />} />
             <Route path="/explore" element={<ExplorePage />} />
             <Route path="/trending" element={<TrendingPage />} />
             <Route path="/subscriptions" element={<SubscriptionsPage />} />
-            <Route path="/library" element={<LibraryPage onCreate={() => setCreateOpen(true)} />} />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/watch-later" element={<WatchLaterPage />} />
             <Route path="/liked" element={<LikedPage />} />
             <Route path="/results" element={<ResultsPage />} />
-            <Route path="/channel/:channelId" element={<ChannelPage onCreate={() => setCreateOpen(true)} />} />
-            <Route path="/watch/:id" element={<WatchPage onCreate={() => setCreateOpen(true)} />} />
+            <Route path="/watch/:id" element={<WatchPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </main>

@@ -4,6 +4,8 @@ import PageHeading from '../components/PageHeading'
 import VideoGrid from '../components/VideoGrid'
 import EmptyState from '../components/EmptyState'
 import { ALL_CHANNEL_MAP, CHANNELS } from '../data/seed'
+import { channelForVideo } from '../lib/uploader'
+import { channelPath } from '../data/seed'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 
@@ -12,7 +14,9 @@ export default function SubscriptionsPage() {
   usePageTitle('Subscriptions')
 
   const subscribed = subscriptions.map((id) => ALL_CHANNEL_MAP[id]).filter(Boolean)
-  const videos = allVideos.filter((video) => subscriptions.includes(video.channelId))
+  // Matched on the resolved channel, so videos that arrived without an
+  // explicit attribution still turn up under the uploader they were given.
+  const videos = allVideos.filter((video) => subscriptions.includes(channelForVideo(video).id))
 
   return (
     <>
@@ -22,7 +26,7 @@ export default function SubscriptionsPage() {
         action={
           <Link
             to="/explore"
-            className="flex h-10 items-center gap-2 rounded-full bg-[#f2f2f4] px-4 text-[13.5px] font-semibold text-ink transition hover:bg-[#e8e8ec]"
+            className="flex h-10 items-center gap-2 rounded-full bg-raise px-4 text-[13.5px] font-semibold text-ink transition hover:bg-sunken"
           >
             <Plus size={17} /> Find channels
           </Link>
@@ -32,17 +36,20 @@ export default function SubscriptionsPage() {
       {subscribed.length > 0 ? (
         <>
           <div className="no-scrollbar -mx-1 mb-8 flex gap-3 overflow-x-auto px-1 pb-1">
-            {CHANNELS.filter((channel) => channel.id !== 'you').map((channel) => {
+            {CHANNELS.map((channel) => {
               const isSubscribed = subscriptions.includes(channel.id)
               return (
                 <div
                   key={channel.id}
-                  className="flex w-[176px] shrink-0 flex-col items-center gap-2 rounded-2xl border border-line bg-white px-3 py-4 text-center"
+                  className="flex w-[176px] shrink-0 flex-col items-center gap-2 rounded-2xl border border-line bg-surface px-3 py-4 text-center"
                 >
-                  <Link to={`/channel/${channel.id}`}>
-                    <img src={channel.avatar} alt="" className="h-14 w-14 rounded-full object-cover" />
+                  <Link to={channelPath(channel.id)} aria-label={`${channel.name} channel`} className="shrink-0">
+                    <img src={channel.avatar} alt="" className="block h-14 w-14 rounded-full object-cover" />
                   </Link>
-                  <Link to={`/channel/${channel.id}`} className="line-clamp-1 text-[13.5px] font-semibold hover:text-brand-700">
+                  <Link
+                    to={channelPath(channel.id)}
+                    className="line-clamp-1 text-[13.5px] font-semibold hover:text-brand-700 hover:underline"
+                  >
                     {channel.name}
                   </Link>
                   <p className="text-[11.5px] text-muted">{channel.subscribers} subscribers</p>
@@ -52,8 +59,8 @@ export default function SubscriptionsPage() {
                     className={[
                       'mt-1 flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold transition',
                       isSubscribed
-                        ? 'bg-[#f2f2f4] text-ink hover:bg-[#e8e8ec]'
-                        : 'bg-ink text-white hover:bg-black',
+                        ? 'bg-raise text-ink hover:bg-sunken'
+                        : 'bg-action text-on-action hover:opacity-90',
                     ].join(' ')}
                   >
                     {isSubscribed ? 'Subscribed' : <><UserPlus size={14} /> Subscribe</>}

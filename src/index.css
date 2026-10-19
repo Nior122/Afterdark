@@ -1,6 +1,9 @@
 @import '@fontsource-variable/inter';
 @import 'tailwindcss';
 
+/* Class-based dark mode: the `.dark` class on <html> is the single switch. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
@@ -14,18 +17,63 @@
   --color-brand-600: #e11d48;
   --color-brand-700: #be123c;
 
+  /*
+   * Semantic surfaces. Components use these instead of raw hex so that flipping
+   * the theme only requires overriding the variables below — no `dark:`
+   * variants sprinkled through the tree. The values match the previous
+   * hard-coded palette, so the light theme renders identically to before.
+   */
   --color-ink: #0f0f0f;
+  --color-body: #262626;
   --color-muted: #606060;
+  --color-faint: #8f8f97;
   --color-line: #ececee;
+
+  --color-surface: #ffffff;
+  --color-panel: #fafafb;
+  --color-raise: #f2f2f4;
+  --color-sunken: #e8e8ec;
+  --color-field: #ededf0;
+
+  /* Inverted controls (e.g. Subscribe). Flips to a light pill with dark text. */
+  --color-action: #0f0f0f;
+  --color-on-action: #ffffff;
+}
+
+/* Dark palette: only the variables change. */
+.dark {
+  --color-ink: #f4f4f5;
+  --color-body: #cfcfd6;
+  --color-muted: #9c9ca6;
+  --color-faint: #6f6f79;
+  --color-line: #2a2a2f;
+
+  --color-surface: #0b0b0d;
+  --color-panel: #141417;
+  --color-raise: #1e1e22;
+  --color-sunken: #2a2a30;
+  --color-field: #1c1c20;
+
+  --color-action: #f4f4f5;
+  --color-on-action: #0f0f0f;
+
+  --color-brand-50: #2a1217;
+  --color-brand-100: #3a171e;
+  --color-brand-200: #5b1d29;
+
+  color-scheme: dark;
 }
 
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    color-scheme: light;
   }
 
   body {
-    @apply bg-white font-sans text-ink antialiased;
+    @apply bg-surface font-sans text-ink antialiased;
+    /* Avoid a flash of inverted contrast when the class is toggled. */
+    transition: background-color 160ms ease, color 160ms ease;
   }
 
   button {

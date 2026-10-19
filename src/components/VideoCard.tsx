@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom'
 import { BadgeCheck } from 'lucide-react'
 import type { Ad, Video } from '../data/seed'
-import { ALL_CHANNEL_MAP } from '../data/seed'
+import { channelForVideo, faceForVideo } from '../lib/uploader'
+import { channelPath } from '../data/seed'
+import { avatarFallbackFor } from '../lib/avatars'
 import { useStore } from '../lib/store'
 import KebabMenu from './KebabMenu'
 
@@ -13,7 +15,9 @@ function adData(item: FeedItem): Ad | null {
 
 export default function VideoCard({ video }: { video: FeedItem }) {
   const { removeVideo } = useStore()
-  const channel = ALL_CHANNEL_MAP[video.channelId]
+  // Resolved, not stored: uploads carry no channel of their own, so the
+  // category decides which uploader gets the credit.
+  const channel = channelForVideo(video)
   const ad = adData(video)
   const headline = ad?.adHeadline?.trim()
   const isOwn = video.id.startsWith('u-')
@@ -22,7 +26,7 @@ export default function VideoCard({ video }: { video: FeedItem }) {
     <article className="group/video min-w-0">
       <Link
         to={`/watch/${video.id}`}
-        className="relative block aspect-video w-full overflow-hidden rounded-xl bg-[#f2f2f4]"
+        className="relative block aspect-video w-full overflow-hidden rounded-xl bg-raise"
       >
         <img
           src={video.thumbnail}
@@ -57,12 +61,21 @@ export default function VideoCard({ video }: { video: FeedItem }) {
       </Link>
 
       <div className="mt-3 flex items-start gap-3">
-        <Link to={`/channel/${video.channelId}`} className="mt-0.5 shrink-0" aria-label={channel?.name}>
+        {/* The uploader's face, i.e. the face of the channel the video is
+            attributed to, so all uploads from one uploader look alike. Both
+            the face and the name lead to that channel's page. */}
+        <Link
+          to={channelPath(channel.id)}
+          aria-label={`More from ${channel.name}`}
+          className="mt-0.5 shrink-0"
+        >
           <img
-            src={channel?.avatar}
-            alt={channel?.name ?? ''}
-            loading="lazy"
-            className="h-9 w-9 rounded-full object-cover ring-1 ring-black/[0.04]"
+            src={faceForVideo(video)}
+            onError={(event) => {
+              event.currentTarget.src = avatarFallbackFor(video)
+            }}
+            alt=""
+            className="block h-9 w-9 rounded-full ring-1 ring-black/[0.06] dark:ring-1 dark:ring-white/10"
           />
         </Link>
 
@@ -74,21 +87,25 @@ export default function VideoCard({ video }: { video: FeedItem }) {
             {video.title}
           </Link>
 
-          <div className="mt-1 flex min-w-0 items-center gap-1 text-[13px] text-[#606060]">
-            <Link to={`/channel/${video.channelId}`} className="truncate hover:text-ink">
-              {channel?.name ?? 'Unknown channel'}
+          <div className="mt-1 flex min-w-0 items-center gap-1 text-[13px] text-muted">
+            <Link
+              to={channelPath(channel.id)}
+              className="truncate hover:text-ink hover:underline"
+            >
+              {channel.name}
             </Link>
-            {channel?.verified && (
+            <span className="shrink-0 text-faint">· {channel.subscribers}</span>
+            {channel.verified && (
               <BadgeCheck
                 size={13}
                 strokeWidth={2.2}
-                className="shrink-0 text-[#8a8a92]"
+                className="shrink-0 text-faint"
                 aria-label="Verified"
               />
             )}
           </div>
 
-          <p className="mt-0.5 whitespace-nowrap text-[13px] text-[#606060]">
+          <p className="mt-0.5 whitespace-nowrap text-[13px] text-muted">
             {video.views} · {video.publishedAt}
           </p>
         </div>

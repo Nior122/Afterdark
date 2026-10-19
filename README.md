@@ -20,7 +20,7 @@ Node 18+ is required.
 
 ## Adding a video (no upload, no storage)
 
-Click **Create** in the header (or "Add video" on the Library / your channel page) and paste a link:
+Click **Create** in the header (or "Add a video" on the Library page) and paste a link:
 
 | Link type | What happens |
 | --- | --- |
@@ -71,24 +71,30 @@ up to 20 MB, so larger videos still go through public `t.me` links.
 | `/explore` | Category tiles and discovery rows |
 | `/trending` | Videos sorted by view count |
 | `/subscriptions` | Subscribed channels + their uploads (subscribe/unsubscribe works) |
-| `/library` | History / Watch later / Liked / Your channel shortcuts + your uploads |
+| `/library` | History / Watch later / Liked shortcuts + videos you added |
 | `/history`, `/watch-later`, `/liked` | Collections, all persisted |
 | `/results?q=…` | Search across adult videos, channels, categories and tags |
-| `/channel/:id` | Channel banner, tabs (Home / Videos / About), subscribe |
-| `/watch/:id` | Player, like/save/share, expandable description, comments, "Up next" rail |
+| `/watch/:id` | Player, like/save/share, expandable description, "Up next" rail |
+
+There are no accounts, profiles or comment sections: nothing requires a login, and channel
+names are attribution metadata only (`/channel/:id` routes do not exist). Videos you add are
+stored unattributed in your own browser.
 | `*` | 404 |
 
 ## Project structure
 
 ```
 public/
-  avatars/       channel avatars (SVG/JPG)
+  avatars/       channel avatars (SVG)
   thumbnails/    seeded video thumbnails
   favicon.svg
 src/
-  components/    Header, Sidebar, CategoryBar, VideoCard/Grid/Row, CreateModal, KebabMenu…
-  data/seed.ts   POV Central + your channel, the 4-video catalogue, adult categories (ad arrays are empty)
+  components/    Header, Sidebar, CategoryBar, VideoCard/Grid/Row, CreateModal, AgeGate, ThemeToggle, KebabMenu…
+  data/seed.ts   POV Central (attribution metadata only), the 4-video catalogue, adult categories (ad arrays are empty)
   lib/store.tsx  React context store persisted to localStorage
+  lib/theme.tsx  light/dark theme provider (localStorage + prefers-color-scheme)
+  lib/age.ts     18+ acceptance flag and hook
+  lib/avatars.ts  generated uploader avatars (data-URI SVG, see below)
   lib/video.ts   URL parsing (YouTube/Vimeo/Telegram posts/direct files), view + duration formatting
   lib/hooks.ts   click-outside, escape, page title
   pages/         one component per route
@@ -102,7 +108,63 @@ src/
   videos in `SEED_VIDEOS` — 3 POV embeds plus 1 Homemade Telegram post
   (`RECOMMENDED_ADS`/`TRENDING_ADS` are empty arrays).
 - Inter is bundled locally via `@fontsource-variable/inter`, so no external font request is needed.
-- The light theme is fixed (no dark mode) to match the reference.
+- **Theming.** Light and dark are both supported. Components never carry `dark:` variants or raw hex:
+  they use the semantic tokens in `src/index.css` (`surface`, `panel`, `raise`, `sunken`, `field`, `line`,
+  `ink`, `body`, `muted`, `faint`, `action`/`on-action`), and `.dark` overrides those variables on `<html>`.
+  Toggling is therefore one class, and any new component is themed automatically by using a token.
+  The choice persists in `afterdark.theme.v1`; while nothing is stored the app follows
+  `prefers-color-scheme` live. A blocking script in `index.html` applies the class before first paint,
+  so a reload never flashes white.
+- **Age gate.** `<AgeGate>` in `main.tsx` renders nothing of the site — not the header, not a single
+  thumbnail — until the visitor confirms they are 18+. Acceptance is stored as `afterdark.age.v1=yes`
+  in localStorage (no account, no server call); "I am under 18" shows a refusal screen instead. The gate
+  also carries a theme toggle, since it is the first screen visitors see.
+- **Channels = uploaders.** Every listing is attributed to a channel, and a channel
+  *is* the uploader: a name, one face from the avatar pool, a verified flag and a
+  **fake** subscriber count. `src/data/seed.ts` carries a roster of **100** names, four per
+  browse category (`POV Central` / `Her Lens POV` / `Lens Loaded POV` / `First Person Files`
+  for POV), and `selectChannelRoster(poolSize)` keeps live only as many as the avatar pool
+  can fund without two channels sharing a face: 2 per category from 50 faces, 3 from 75, all 4
+  from 100. The pool is therefore the single dial — raising `UPLOADER_AVATAR_COUNT` grows the
+  uploader roster with it, and a pool too small for the next tier keeps the current tier instead
+  of duplicating faces. Crossing a tier does re-shuffle which sibling channel a video hashes
+  onto (same category, different uploader). `channelForVideo(video)` in
+  `src/lib/uploader.ts` does the assignment: an explicitly attributed video keeps its
+  channel, while uploads and Telegram imports (`channelId: ''`) are placed on one of the
+  channels that publish in *their own category*, chosen by hashing the video id. So a POV
+  upload lands on a POV channel, the pairing is stable across reloads and identical on
+  every device, and nothing is stored — the feature works for videos that already exist
+  as well as future ones. Subscriber counts are log-uniform (~2K–~800K, floored so no
+  channel looks dead) and are invented, like the performers: no number here is real and
+  none should be quoted as one. `faceForVideo(video)` returns the channel's face, so all
+  uploads from one channel look like the same uploader; the per-video `avatar` field
+  overrides it when you need to pin a specific face. Cards and rows show
+  `name · subscribers`; the watch page, subscriptions rail, search results and the bell
+  feed all read the same resolver. Each channel has a page — `/channel/:id`, reachable by
+  clicking any uploader name or face, plus the sidebar subscriptions, the subscriptions rail
+  and search results — listing every video attributed to it (`videosForChannel`). There are
+  still no visitor accounts.
+  To rename or re-scope a channel, edit `CHANNEL_ROSTER` — ids are slugs of the names, and
+  `pov-central` is the one id the code special-cases. Names beyond the live tier stay dormant
+  until the pool is big enough for them.
+
+- **Uploader avatars.** Every video shows a distinct avatar in the feed, the row list
+  and the watch page. The pool is `public/avatars/uploader-01.jpg` … `uploader-63.jpg`:
+  **AI-generated synthetic portraits** — they are not photographs of any real person, and no
+  real likeness is attached to any listing. They are clothed, non-sexual headshots of adult
+  women, sized 192×192 (~5–9 kB each, 572 kB for all 63) because they render at 20–40 px.
+  `avatarFor(video.id)` hashes the id into the pool, so uploads acquire an avatar automatically
+  with no configuration and the same video always shows the same face on every device.
+  Seeded catalogue entries pin an explicit `avatar` in `data/seed.ts` so the demo feed shows
+  four different faces; add that field to override the hash for any video.
+  Two consequences of a real image pool: distinct faces are capped by the pool size, and
+  viewers may read an avatar as the performer — consider labelling them as illustrative if
+  that matters for your audience. Widen the pool by dropping more sequentially named JPGs in
+  `public/avatars/` and raising `UPLOADER_AVATAR_COUNT` in `src/lib/avatars.ts`; a missing
+  file falls back to the generator via `onError` rather than showing a broken image. `src/lib/avatars.ts` also keeps a procedural illustrated generator
+  (122,880 combinations) used automatically if the pool is ever emptied.
+- There is no UI trigger for adding a video: the modal, `addVideo` and URL parsing are intact, but the
+  header/library/watch-page buttons were removed by design.
 
 ## Scripts
 
