@@ -130,13 +130,17 @@ src/
   of duplicating faces. Crossing a tier does re-shuffle which sibling channel a video hashes
   onto (same category, different uploader). `channelForVideo(video)` in
   `src/lib/uploader.ts` does the assignment: an explicitly attributed video keeps its
-  channel, while uploads and Telegram imports (`channelId: ''`) are placed on one of the
-  channels that publish in *their own category*, chosen by hashing the video id. So a POV
-  upload lands on a POV channel, the pairing is stable across reloads and identical on
-  every device, and nothing is stored — the feature works for videos that already exist
-  as well as future ones. Subscriber counts are log-uniform (~2K–~800K, floored so no
-  channel looks dead) and are invented, like the performers: no number here is real and
-  none should be quoted as one. `faceForVideo(video)` returns the channel's face, so all
+  channel, while uploads and Telegram imports (`channelId: ''`) are spread across the
+  *whole live roster*, chosen by hashing the video id over every channel. A hashtag-less
+  bot import no longer concentrates on two channels — measured across 5 000 bot-style
+  ids, all 50 channels receive uploads (busiest holds 2.4 %, spread min 69 / max 122).
+  The pairing is stable across reloads and identical on every device, and nothing is
+  stored. An import with no declared category inherits its uploader's niche; a declared
+  one is kept. View counts (`src/lib/stats.ts`) are derived per video id: a log-uniform
+  ceiling ramped from 18 % to 100 % over two days, nothing stored, so counts age on their
+  own and match across devices. Subscriber counts are log-uniform (~2K–~800K, floored so
+  no channel looks dead) and are invented, like the performers: no number here is real
+  and none should be quoted as one. `faceForVideo(video)` returns the channel's face, so all
   uploads from one channel look like the same uploader; the per-video `avatar` field
   overrides it when you need to pin a specific face. Cards and rows show
   `name · subscribers`; the watch page, subscriptions rail, search results and the bell
