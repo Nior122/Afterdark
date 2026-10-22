@@ -16,6 +16,8 @@ export interface AdminVideo {
   durationSec: number
   kind: 'telegram' | 'link'
   tooLarge?: boolean
+  /** Real view count from the Worker's counter (0 until the first view). */
+  views: number
   sourceUrl: string | null
   streamUrl: string | null
   thumbUrl: string | null
@@ -117,6 +119,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T
 }
 
+/** The Worker accepts at most 200 ids per bulk call; chunk anything larger. */
+function chunk<T>(items: T[], size = 200): T[][] {
+  const out: T[][] = []
+  for (let index = 0; index < items.length; index += size) out.push(items.slice(index, index + size))
+  return out
+}
+
 export const admin = {
   settings: () => request<AdminSettings>('settings'),
   setMode: (mode: SiteMode) =>
@@ -141,7 +150,17 @@ export const admin = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
-  videos: () => request<{ videos: AdminVideo[]; total: number }>('videos'),
+  videos: async () => {
+    const raw = await request<{ videos: AdminVideo[]; total: number; viewsTotal?: number }>('videos')
+    // Normalise so the table can sort/read `views` even against a Worker
+    // deployed before view counting existed.
+    const videos = (raw.videos || []).map((video) => ({ ...video, views: Number(video.views) || 0 }))
+    return {
+      videos,
+      total: raw.total ?? videos.length,
+      viewsTotal: Number(raw.viewsTotal) || videos.reduce((sum, video) => sum + video.views, 0),
+    }
+  },
   updateVideo: (id: string, patch: Partial<Pick<AdminVideo, 'title' | 'category' | 'description' | 'tags'>>) =>
     request<{ ok: true }>(`videos/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -149,11 +168,52 @@ export const admin = {
     }),
   deleteVideo: (id: string) =>
     request<{ ok: true }>(`videos/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Bulk delete: one call per 200 ids; ids gone mid-flight come back in `missing`. */
+  bulkDeleteVideos: async (ids: string[]) => {
+    const deleted: string[] = []
+    const missing: string[] = []
+    for (const part of chunk(ids)) {
+      const result = await request<{ ok: true; deleted: string[]; missing: string[] }>('videos/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids: part }),
+      })
+      deleted.push(...result.deleted)
+      missing.push(...result.missing)
+    }
+    return { ok: true as const, deleted, missing }
+  },
+  /** Bulk recategorise; same chunking as the delete. */
+  bulkPatchVideos: async (ids: string[], patch: { category: string }) => {
+    const updated: string[] = []
+    const missing: string[] = []
+    for (const part of chunk(ids)) {
+      const result = await request<{ ok: true; updated: string[]; missing: string[] }>('videos/bulk-patch', {
+        method: 'POST',
+        body: JSON.stringify({ ids: part, ...patch }),
+      })
+      updated.push(...result.updated)
+      missing.push(...result.missing)
+    }
+    return { ok: true as const, updated, missing }
+  },
   drafts: () => request<{ drafts: AdminDraft[] }>('drafts'),
   scrape: (url: string) =>
-    request<{ ok: true; drafts: AdminDraft[]; site?: string; pageTitle?: string }>('scrape', {
+    request<{
+      ok: true
+      drafts: AdminDraft[]
+      /** Videos skipped because the same source URL is already published or drafted. */
+      duplicates?: number
+      site?: string
+      pageTitle?: string
+    }>('scrape', {
       method: 'POST',
       body: JSON.stringify({ url }),
+    }),
+  /** Discard the given drafts — or every pending draft when ids are omitted. */
+  discardDrafts: (ids?: string[]) =>
+    request<{ ok: true; discarded: string[] }>('drafts/discard-all', {
+      method: 'POST',
+      body: JSON.stringify(ids?.length ? { ids } : {}),
     }),
   updateDraft: (id: string, patch: Partial<Pick<AdminDraft, 'title' | 'category'>>) =>
     request<{ ok: true; draft: AdminDraft }>(`drafts/${encodeURIComponent(id)}`, {

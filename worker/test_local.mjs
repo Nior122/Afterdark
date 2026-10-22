@@ -1,10 +1,13 @@
 /**
  * Local test harness for worker.js — no Cloudflare or Telegram account needed.
  * Run:  node worker/test_local.mjs
- * Mocks KV storage, the Telegram Bot API and a couple of web pages, then
- * drives the worker through: publish by forward -> feed -> stream, scraping a
- * page and a gallery into drafts, review/publish/cancel, rename, full list,
- * paging and delete.
+ * Mocks KV storage, the Telegram Bot API and a few web pages, then drives the
+ * worker through: publish by forward -> feed -> stream, scraping pages and
+ * galleries into drafts (with duplicate detection for the bulk scrape),
+ * review/publish/cancel, rename, full list, paging and delete, the site
+ * settings (mode, redirect, ads incl. per-slot enable and preview), view
+ * counting with per-session dedupe, and the bulk admin endpoints
+ * (videos/bulk-delete, videos/bulk-patch, drafts/discard-all).
  */
 import worker from './worker.js'
 
@@ -41,6 +44,15 @@ const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTu
 <a href="/video/222/second-clip" title="Second Anal Clip"><img src="/t/2.jpg" alt="Second Anal Clip" /></a>
 <a href="/video/333/third-clip" title="Third Latina Clip"><img src="/t/3.jpg" alt="Third Latina Clip" /></a>
 <a href="/about">About us</a>
+</body></html>`
+
+// A second listing used by the bulk-scrape tests (kept disjoint from the
+// gallery above so published-source dedupe does not swallow these).
+const GALLERY_PAGE_2 = `<!doctype html><html><head><title>More videos — SomeTube</title>
+<meta property="og:site_name" content="SomeTube" /></head><body>
+<a href="/clip/444/bulk-one" title="Bulk One Clip"><img src="/t/4.jpg" alt="Bulk One Clip" /></a>
+<a href="/clip/555/bulk-two" title="Bulk Two Clip"><img src="/t/5.jpg" alt="Bulk Two Clip" /></a>
+<a href="/clip/666/bulk-three" title="Bulk Three Clip"><img src="/t/6.jpg" alt="Bulk Three Clip" /></a>
 </body></html>`
 
 const realFetch = globalThis.fetch
@@ -96,6 +108,9 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://sometube.test/latest') {
     return new Response(GALLERY_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://sometube.test/more') {
+    return new Response(GALLERY_PAGE_2, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   if (u === 'https://blocked.test/video/999') {
     return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/html' } })
@@ -394,14 +409,25 @@ async function main() {
   check('admin rejects an empty title', emptyTitle.status === 400)
 
   console.log('— admin drafts (scrape -> review -> publish)')
+  // Hotel Hookup is already published at this point, so scrape a fresh page.
   const scrapeRes = await admin('scrape', {
     method: 'POST',
     headers: auth,
-    body: JSON.stringify({ url: 'https://sometube.test/video/hotel-hookup' }),
+    body: JSON.stringify({ url: 'https://sometube.test/video/pov-kitchen' }),
   })
   const scrapeBody = await scrapeRes.json()
   check('admin scrapes into a draft', scrapeRes.status === 200 && scrapeBody.drafts?.length === 1, JSON.stringify(scrapeBody).slice(0, 200))
-  check('draft carries source + category', Boolean(scrapeBody.drafts[0].sourceUrl) && scrapeBody.drafts[0].category === 'MILF')
+  check('draft carries source + category', Boolean(scrapeBody.drafts[0].sourceUrl) && scrapeBody.drafts[0].category === 'POV')
+  check('first scrape sees no duplicates', scrapeBody.duplicates === 0, JSON.stringify(scrapeBody))
+
+  const rescan = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://sometube.test/video/pov-kitchen' }),
+  })
+  const rescanBody = await rescan.json()
+  check('re-scrape returns no drafts', rescan.status === 200 && rescanBody.drafts.length === 0, JSON.stringify(rescanBody))
+  check('re-scrape reports the duplicate', rescanBody.duplicates === 1, JSON.stringify(rescanBody))
 
   const draftsRes = await admin('drafts', { headers: auth })
   const draftsBody = await draftsRes.json()
@@ -427,9 +453,92 @@ async function main() {
   })
   check('admin reports a blocked page', blocked.status === 422)
 
+  // The gallery was published earlier; scraping it whole must read as duplicate.
+  const galleryAgain = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://sometube.test/latest' }),
+  })
+  const galleryAgainBody = await galleryAgain.json()
+  check('gallery re-scrape is all duplicates', galleryAgainBody.drafts.length === 0 && galleryAgainBody.duplicates === 3, JSON.stringify(galleryAgainBody))
+
   const delRes = await admin(`videos/${linkVideo.id}`, { method: 'DELETE', headers: auth })
   check('admin deletes a video', delRes.status === 200)
   check('deleted video gone from feed', !(await feedOf(adminEnv)).some((v) => v.id === linkVideo.id))
+
+  console.log('— view tracking')
+  const feedForViews = await feedOf(adminEnv)
+  const watched = feedForViews[0]
+  const otherWatched = feedForViews[1]
+  const viewPost = (vid, body, headers = {}) =>
+    call(adminEnv, `https://worker.test/api/videos/${vid}/view`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body })
+  const v1 = await (await viewPost(watched.id, JSON.stringify({ session: 'sess-aaaa1111' }))).json()
+  check('first view counted', v1.ok === true && v1.counted === true && v1.views === 1, JSON.stringify(v1))
+  const v2 = await (await viewPost(watched.id, JSON.stringify({ session: 'sess-aaaa1111' }))).json()
+  check('same session does not recount', v2.counted === false && v2.views === 1, JSON.stringify(v2))
+  const v3 = await (await viewPost(watched.id, JSON.stringify({ session: 'sess-bbbb2222' }))).json()
+  check('new session counts again', v3.counted === true && v3.views === 2, JSON.stringify(v3))
+  const v4 = await (await viewPost(otherWatched.id, JSON.stringify({ session: 'sess-aaaa1111' }))).json()
+  check('dedupe is per video (same session, other video counts)', v4.counted === true && v4.views === 1, JSON.stringify(v4))
+  const v5 = await (await viewPost(watched.id, '')).json()
+  check('view POST without a session still counts once', v5.counted === true && v5.views === 3, JSON.stringify(v5))
+  const v6 = await (await viewPost(watched.id, '')).json()
+  check('the anon fallback still dedupes', v6.counted === false, JSON.stringify(v6))
+  check('view on an unknown video is 404', (await viewPost('does-not-exist', JSON.stringify({ session: 'sess-cccc3333' }))).status === 404)
+  const preflight = await call(adminEnv, `https://worker.test/api/videos/${watched.id}/view`, { method: 'OPTIONS' })
+  check('view endpoint answers CORS preflight', preflight.status === 204 && (preflight.headers.get('access-control-allow-methods') || '').includes('POST'))
+  check('the view response is CORS-enabled', (await call(adminEnv, `https://worker.test/api/videos/${watched.id}/view`, { method: 'POST', body: '{}' })).headers.get('access-control-allow-origin') === '*')
+  const feedWithViews = await feedOf(adminEnv)
+  check('feed exposes views per video', feedWithViews.find((x) => x.id === watched.id)?.views === 3, JSON.stringify(feedWithViews.find((x) => x.id === watched.id)))
+  check('feed leaves unseen videos at zero', feedWithViews[feedWithViews.length - 1].views === 0)
+  const adminViewList = await (await admin('videos', { headers: auth })).json()
+  check('admin list exposes views + total', adminViewList.videos.find((x) => x.id === watched.id)?.views === 3 && adminViewList.viewsTotal === 4, JSON.stringify({ total: adminViewList.viewsTotal }))
+
+  console.log('— bulk management')
+  const two = (await (await admin('videos', { headers: auth })).json()).videos.slice(0, 2)
+  const bulkPatch = await admin('videos/bulk-patch', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ids: two.map((x) => x.id), category: 'Lesbian' }),
+  })
+  const bulkPatchBody = await bulkPatch.json()
+  check('bulk recategorise updates both', bulkPatch.status === 200 && bulkPatchBody.updated.length === 2 && bulkPatchBody.missing.length === 0, JSON.stringify(bulkPatchBody))
+  const feedAfterBulk = await feedOf(adminEnv)
+  check('bulk category shows in the feed', two.every((x) => feedAfterBulk.find((v) => v.id === x.id)?.category === 'Lesbian'))
+  const badBulk = await admin('videos/bulk-patch', { method: 'POST', headers: auth, body: JSON.stringify({ ids: [two[0].id], category: 'Nope' }) })
+  check('bulk patch rejects an unknown category', badBulk.status === 400)
+  const emptyBulk = await admin('videos/bulk-patch', { method: 'POST', headers: auth, body: JSON.stringify({ ids: [], category: 'Anal' }) })
+  check('bulk patch demands ids', emptyBulk.status === 400)
+  const bulkDelete = await admin('videos/bulk-delete', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ids: [two[0].id, 'no-such-id'] }),
+  })
+  const bulkDeleteBody = await bulkDelete.json()
+  check('bulk delete reports deleted and missing', bulkDelete.status === 200 && bulkDeleteBody.deleted.length === 1 && bulkDeleteBody.missing.length === 1, JSON.stringify(bulkDeleteBody))
+  const feedAfterDelete = await feedOf(adminEnv)
+  check('deleted video gone, other kept', !feedAfterDelete.some((v) => v.id === two[0].id) && feedAfterDelete.some((v) => v.id === two[1].id))
+  check('delete clears the counter', (await adminEnv.VIDEOS.get(`views:${two[0].id}`)) == null)
+  const listed = await (await admin('videos', { headers: auth })).json()
+  check('views total follows the delete', listed.viewsTotal === listed.videos.reduce((sum, v) => sum + v.views, 0), JSON.stringify({ viewsTotal: listed.viewsTotal }))
+
+  console.log('— bulk scrape flow (scrape -> publish-all / review / discard)')
+  const bulkDraftScrape = await (await admin('scrape', { method: 'POST', headers: auth, body: JSON.stringify({ url: 'https://sometube.test/more' }) })).json()
+  check('gallery scrape yields three drafts', bulkDraftScrape.drafts.length === 3 && bulkDraftScrape.duplicates === 0, JSON.stringify({ drafts: bulkDraftScrape.drafts.length }))
+  const pendingIds = bulkDraftScrape.drafts.map((d) => d.id)
+  const discardTwo = await admin('drafts/discard-all', { method: 'POST', headers: auth, body: JSON.stringify({ ids: pendingIds.slice(0, 2) }) })
+  const discardTwoBody = await discardTwo.json()
+  check('discard-all removes exactly the given drafts', discardTwo.status === 200 && discardTwoBody.discarded.length === 2, JSON.stringify(discardTwoBody))
+  check('the kept draft survives', (await (await admin('drafts', { headers: auth })).json()).drafts.length === 1)
+  const publishSome = await admin('drafts/publish-all', { method: 'POST', headers: auth, body: JSON.stringify({ ids: [pendingIds[2]] }) })
+  check('publish-all with ids publishes only those', publishSome.status === 200 && (await publishSome.json()).published.length === 1)
+  // 444/555 were discarded (so they scrape fresh again), 666 was published
+  // (so it dedupes) — exactly the per-URL statuses the dashboard renders.
+  const repaste = await admin('scrape', { method: 'POST', headers: auth, body: JSON.stringify({ url: 'https://sometube.test/more' }) })
+  const repasteBody = await repaste.json()
+  check('re-scrape: published draft dedupes, discarded ones do not', repasteBody.drafts.length === 2 && repasteBody.duplicates === 1, JSON.stringify(repasteBody))
+  const discardRest = await admin('drafts/discard-all', { method: 'POST', headers: auth, body: JSON.stringify({}) })
+  check('discard-all without ids clears the queue', (await discardRest.json()).discarded.length === 2 && (await (await admin('drafts', { headers: auth })).json()).drafts.length === 0)
 
   console.log('— redirect URL')
   const redirectDefault = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
@@ -470,6 +579,8 @@ async function main() {
   const adsDefault = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
   check('ads are off by default', adsDefault.ads.enabled === false)
   check('every slot is empty by default', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => adsDefault.ads[slot] === ''))
+  check('every slot is individually on by default', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => adsDefault.ads.slotsOn[slot] === true))
+  check('preview outlines are off by default', adsDefault.ads.preview === false)
 
   const saveAds = await admin('settings', {
     method: 'POST',
@@ -500,6 +611,39 @@ async function main() {
   })
   check('oversized ad code rejected', tooLong.status === 400)
 
+  console.log('— ads: per-slot enable + preview outlines')
+  const slotsOff = await (await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { slotsOn: { header: false, sidebar: false } } }),
+  })).json()
+  check('per-slot disable stored', slotsOff.ads.slotsOn.header === false && slotsOff.ads.slotsOn.sidebar === false)
+  check('untouched slots stay enabled', slotsOff.ads.slotsOn.native === true && slotsOff.ads.slotsOn.video === true)
+  check('global toggle untouched by slot edits', slotsOff.ads.enabled === true)
+  const slotsPublic = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
+  check('public settings expose slot state', slotsPublic.ads.slotsOn.header === false)
+  check('slot code survives being switched off', slotsPublic.ads.header.includes('__adHeader'))
+  const previewOn = await (await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { preview: true } }),
+  })).json()
+  check('preview flag saved', previewOn.ads.preview === true)
+  check('preview reaches the site', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).ads.preview === true)
+  const slotReOn = await (await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { slotsOn: { header: true } } }),
+  })).json()
+  check('a slot can be switched back on', slotReOn.ads.slotsOn.header === true && slotReOn.ads.slotsOn.sidebar === false)
+  const junkSlots = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { slotsOn: 'all-off', preview: 'yes' } }),
+  })
+  const junkBody = await junkSlots.json()
+  check('non-boolean slotsOn/preview are ignored, not stored', junkBody.ads.slotsOn.header === true && junkBody.ads.preview === true)
+
   sentMessages = []
   await webhook(adminEnv, textMsg(111, '/ads off'))
   check('bot switches ads off', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).ads.enabled === false)
@@ -509,11 +653,13 @@ async function main() {
   sentMessages = []
   await webhook(adminEnv, textMsg(111, '/ads'))
   check('bot reports ad status', /Ads are ON/.test(lastText()) && /header/.test(lastText()), lastText())
+  check('bot status lists per-slot hiding', /Hidden by their per-slot switch: sidebar/.test(lastText()), lastText())
 
   const cleared = await admin('ads/clear', { method: 'POST', headers: auth, body: JSON.stringify({ enabled: false }) })
   const clearedBody = await cleared.json()
   check('clear empties every slot', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => clearedBody.ads[slot] === ''))
   check('clear switches ads off', clearedBody.ads.enabled === false)
+  check('clear re-enables every slot and drops preview', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => clearedBody.ads.slotsOn[slot] === true) && clearedBody.ads.preview === false)
 
   const rebuild = await admin('rebuild', { method: 'POST', headers: auth, body: '{}' })
   check('rebuild explains it is not configured', rebuild.status === 503)

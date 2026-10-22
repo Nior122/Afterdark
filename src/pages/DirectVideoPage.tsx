@@ -6,6 +6,7 @@ import TelegramPlayer from '../components/TelegramPlayer'
 import { applyVideoMeta } from '../lib/meta'
 import { absoluteUrl } from '../lib/site'
 import { useStore } from '../lib/store'
+import { reportVideoView } from '../lib/views'
 import { resolveSource } from '../lib/video'
 import NotFoundPage from './NotFoundPage'
 
@@ -25,6 +26,15 @@ export default function DirectVideoPage() {
   useEffect(() => {
     if (video) applyVideoMeta(video)
   }, [video])
+
+  // The view counter the dashboard reads. Bot-feed videos are recorded in the
+  // Worker (deduped per browser session there); without a Worker, or for
+  // build-time catalogue ids, reportVideoView no-ops or the Worker 404s the
+  // unknown id — fire-and-forget either way.
+  const videoId = video?.id
+  useEffect(() => {
+    if (videoId) reportVideoView(videoId)
+  }, [videoId])
 
   if (!video) {
     // The optional bot feed arrives asynchronously; stay neutral rather than

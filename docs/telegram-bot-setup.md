@@ -6,8 +6,9 @@ from the caption and category from a hashtag.
 
 How it works, in one line:
 
-> Telegram bot → tiny free Cloudflare Worker (stores video IDs, streams
-> playback) → the website reads the Worker's public feed.
+> Telegram bot → tiny free Cloudflare Worker (stores video IDs, counts views,
+> streams playback) → the website reads the Worker's public feed and reports
+> views back to it.
 
 - 💸 Free (Cloudflare's free tier is plenty) · ⏱ about 10 minutes, one time
 - 🔑 Your bot token goes **only** into Cloudflare's secret settings — never
@@ -127,6 +128,9 @@ Paste a link (or `/add <link>`) and the bot scrapes the page:
   embed/`og:video` source and inferred category.
 - **A gallery / category page** → every video it can find on that page
   (up to 24), each with its own title, thumbnail, link and category.
+- **Already scraped?** A source URL that is already published — or already
+  waiting in a draft — comes back reported as a **duplicate** instead of
+  creating a second copy of the same video.
 
 Nothing is public yet. The bot replies with a **draft card** (or a batch
 summary) and buttons:
@@ -170,7 +174,7 @@ you want. Both modes keep every link working.
 | `/remove <id>` | Unpublish straight away |
 | `/mode` | Switch between public catalogue and direct links only; also shows the redirect and ad status |
 | `/redirect <url>` | In direct mode, send the home page (and every non-video URL) to that address with a real 302. `/redirect off` clears it, `/redirect` shows the current value |
-| `/ads on` · `/ads off` | Switch the site's ad slots on or off. The code itself is pasted in the dashboard's **Ads** tab |
+| `/ads on` · `/ads off` | Switch the site's ad slots on or off; the status line also lists slots hidden by their per-slot switch. The code itself, the per-slot switches and preview outlines live in the dashboard's **Ads** tab |
 | `/pending` | Drafts still waiting for review |
 | `/cancel` | Abort a pending “send me the new title” step |
 | `/id` | Show your Telegram user ID (useful below) |
@@ -196,15 +200,37 @@ Everything the bot does, in a web page: **`https://YOURDOMAIN/admin/`**
      direct mode only; blank = neutral 18+ page).
    - **Ads** — paste ad code per slot (header, native, sidebar, footer, video,
      popunder) and switch ads on/off. Slots reserve their height, so the page
-     never jumps; with ads off nothing renders.
-   - **Videos** — every video the bot published: rename inline, change the
-     category from a dropdown, delete (with a confirm step), open the source.
-   - **Add from link** — paste a URL, scrape it, and land in Drafts.
-   - **Drafts** — edit the title/category, publish one, publish all, or discard.
-     Nothing is public until you publish.
+     never jumps; with ads off nothing renders. Each slot also has its **own
+     enable switch** (instant, like the global one) — a slot renders only when
+     the global toggle *and* its own switch are on, so you can run one network
+     without touching another. **Preview outlines** turns every site ad slot
+     into a dashed, labelled box (`on` / `off` / `empty`) so you can check
+     placement across pages without executing any third-party code. All of it
+     is a runtime setting — switching needs no rebuild.
+   - **Videos** — the published catalogue with management built for volume:
+     **search** (title, id, tag, site), a **category filter**, **sorting** by
+     views / newest / title, **pagination**, and a per-row thumbnail, real view
+     count and added date. **Check any rows** (or “select all” the filtered
+     set) and the bulk bar appears: **delete many** or **recategorise the
+     selection** in one action. Per row: rename inline, change category,
+     **copy link** (the canonical `/v/<id>/` URL), **open page**, delete with a
+     confirm step. The tab header shows the **total view count**.
+   - **Add from link** — paste one URL or a multi-line list of up to **20** and
+     press *Scrape*: each link is scraped sequentially with a live status
+     (`queued → scraping → scraped · N / blocked / duplicate — already on the
+     site`). A single gallery URL behaves the same way and turns into one draft
+     per video found. When the run ends: **Publish all**, **Review each** (jumps
+     to Drafts) or **Discard batch** — only the drafts this run created.
+   - **Drafts** — edit the title/category, publish one, publish all, discard
+     one or **discard all**. Nothing is public until you publish.
    - **Rebuild site** — triggers the deploy workflow (needs `GITHUB_TOKEN` +
      `GITHUB_REPO`). Use it after adding videos so their pages and the sitemap
      are regenerated.
+
+Views shown in the dashboard are the site's own counter: every video page
+(`/v/<id>/` in both modes, and `/watch/:id` in the catalogue) reports a view to
+the Worker once per browser session, so reloads don't inflate it and no
+visitor identity is stored. Deleting a video (one or many) clears its counter.
 
 The dashboard is `noindex` and is not linked from any video page, so it stays
 out of search results.
@@ -235,8 +261,9 @@ to appear on the site automatically:
 | New video isn't in sitemap.xml yet | The sitemap is generated at build time. Press **Rebuild site** in the dashboard (or re-run the deploy workflow) after publishing. Direct links work immediately either way. |
 | Mode switch seems ignored | Confirm `VITE_TELEGRAM_FEED_URL` is set for the **site** build and the site was redeployed after setting it — without it the site has no Worker to ask and stays in public mode. |
 | Home page does not redirect | The redirect only applies in **direct** mode, and it needs `VITE_TELEGRAM_FEED_URL` on the Pages project so `functions/_middleware.ts` can read it. Rules take up to 60 s to refresh (settings are cached at the edge). |
-| Ads do not show | Ads must be switched **on** (dashboard toggle or `/ads on`), the slot must contain code, and the page must be reloaded — the site fetches settings on load. |
+| Ads do not show | Ads must be switched **on** (dashboard toggle or `/ads on`), the slot must contain code, **its own per-slot switch must be on** (the Ads tab shows each slot's state), and the page must be reloaded — the site fetches settings on load. Use **preview outlines** to confirm the slot is where you expect; remember nothing renders *or runs* while previewing, so switch it off afterwards. |
 | Ad code appears as text / does nothing | The slot must contain a full tag (e.g. `<script src="…"></script>`), not a bare URL. Check the browser console for the network's own error. |
+| Views stay at 0 in the dashboard | Views are counted by the site, not the bot: the build must have `VITE_TELEGRAM_FEED_URL` set (otherwise the pages have no Worker to report to), the video must be in the bot feed, and each browser session counts **once** — open the link from another browser or a private window to test. The feed itself is cached for 60 s. |
 | "⚠️ … up to 20 MB" | The video is too big for Telegram bots. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or publish that one via a public `t.me` link instead. |
 | Token leaked | In @BotFather send `/revoke`, put the new token in the `BOT_TOKEN` secret, repeat Step 5. Old file links keep working via the Worker. |
 

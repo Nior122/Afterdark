@@ -21,13 +21,19 @@ interface Props {
  *
  * `innerHTML` deliberately does not execute <script> tags, so each one is
  * replaced by a fresh <script> element — that is the standard way to run
- * third-party ad tags. The slot reserves its height up front (no layout shift)
- * and renders nothing at all when ads are off or the slot is empty, so the
- * site stays clean until the owner adds code.
+ * third-party ad tags. The slot reserves its height up front (no layout shift).
+ * A slot shows only when the global switch AND its own per-slot switch are on
+ * and it holds code; otherwise it renders nothing — except in preview mode,
+ * where every slot is drawn as a dashed outline (with its current state) and
+ * no ad code executes, so placement can be checked before going live. All of
+ * it comes from the runtime settings, so toggling needs no rebuild.
  */
 export default function AdSlot({ slot, className = '' }: Props) {
   const { ads } = useSiteSettings()
-  const code = ads.enabled ? String(ads[slot] || '').trim() : ''
+  const active = ads.enabled && ads.slotsOn[slot]
+  const hasCode = String(ads[slot] || '').trim().length > 0
+  const preview = ads.preview
+  const code = !preview && active ? String(ads[slot] || '').trim() : ''
   const host = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -52,6 +58,21 @@ export default function AdSlot({ slot, className = '' }: Props) {
     }
   }, [code])
 
+  if (preview) {
+    return (
+      <div
+        className={`flex w-full max-w-full items-center justify-center rounded-xl border-2 border-dashed border-amber-400/90 bg-amber-400/10 px-3 ${RESERVED_HEIGHT[slot]} ${className}`}
+        data-ad-preview={slot}
+        role="note"
+        aria-label={`Ad slot preview: ${slot}`}
+      >
+        <span className="rounded-full bg-amber-400/95 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wide text-black">
+          Ad slot · {slot} · {hasCode ? (active ? 'on' : 'off') : 'empty'}
+        </span>
+      </div>
+    )
+  }
+
   if (!code) return null
 
   return (
@@ -69,13 +90,15 @@ export default function AdSlot({ slot, className = '' }: Props) {
 /**
  * Global ad script (popunder / interstitial networks). Mounted once per page
  * view; the module flag stops React StrictMode's double render from injecting
- * the same network script twice, which many networks treat as fraud.
+ * the same network script twice, which many networks treat as fraud. Preview
+ * mode never injects — the popunder has no visual slot to outline.
  */
 let injected = false
 
 export function GlobalAdScript() {
   const { ads } = useSiteSettings()
-  const code = ads.enabled ? String(ads.popunder || '').trim() : ''
+  const code =
+    !ads.preview && ads.enabled && ads.slotsOn.popunder ? String(ads.popunder || '').trim() : ''
 
   useEffect(() => {
     if (!code || injected) return

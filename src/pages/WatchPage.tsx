@@ -22,6 +22,7 @@ import { avatarFallbackFor } from '../lib/avatars'
 import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
+import { reportVideoView } from '../lib/views'
 import { formatCount, resolveSource } from '../lib/video'
 
 function hashString(value: string) {
@@ -83,6 +84,12 @@ export default function WatchPage() {
   useEffect(() => {
     if (id) recordHistory(id)
   }, [id, recordHistory])
+  // Same counter as the standalone /v/<id>/ page, so a view counts once per
+  // browser session whichever mode the site is in.
+  const watchedId = video?.id
+  useEffect(() => {
+    if (watchedId) reportVideoView(watchedId)
+  }, [watchedId])
 
   const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [copied, setCopied] = useState(false)
