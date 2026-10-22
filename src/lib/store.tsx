@@ -47,6 +47,8 @@ interface PersistedState {
 }
 
 interface StoreValue extends PersistedState {
+  /** False until the optional bot feed request has settled. */
+  ready: boolean
   ads: Ad[]
   allVideos: Video[]
   addVideo: (input: NewVideoInput) => Video
@@ -133,10 +135,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state])
 
+  const [feedReady, setFeedReady] = useState(false)
   useEffect(() => {
     let cancelled = false
     void fetchTelegramFeed().then((videos) => {
-      if (!cancelled) setRemoteVideos(videos)
+      if (cancelled) return
+      setRemoteVideos(videos)
+      setFeedReady(true)
     })
     return () => {
       cancelled = true
@@ -251,6 +256,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo<StoreValue>(
     () => ({
       ...state,
+      ready: feedReady,
       ads,
       allVideos,
       addVideo,
@@ -278,6 +284,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toggleSubscription,
       isSubscribed,
       getVideo,
+      feedReady,
     ],
   )
 

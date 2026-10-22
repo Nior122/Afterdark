@@ -104,6 +104,16 @@ export default {
       return handleFeed(env, url.origin)
     }
 
+    // Public site settings: which of the two modes the site renders.
+    if (pathname === '/api/settings' && request.method === 'GET') {
+      return handleSettings(env)
+    }
+
+    // Admin API for the dashboard (Authorization: Bearer ADMIN_TOKEN).
+    if (pathname.startsWith('/api/admin')) {
+      return handleAdmin(request, env, url)
+    }
+
     const media = pathname.match(/^\/api\/videos\/([A-Za-z0-9-]+)\/(stream(?:\.mp4)?|thumb(?:\.jpg)?)$/)
     if (media && request.method === 'GET') {
       const [, id, kind] = media
@@ -151,6 +161,295 @@ async function handleFeed(env, origin) {
       'Cache-Control': 'public, max-age=60',
     },
   })
+}
+
+/* ------------------------------- settings -------------------------------- */
+
+/** `public` = normal tube catalogue; `direct` = link-only pages, sitemap discovery. */
+const MODES = ['public', 'direct']
+const DEFAULT_MODE = 'public'
+
+async function readMode(env) {
+  try {
+    const raw = await env.VIDEOS.get('cfg:mode')
+    const mode = raw ? String(raw) : DEFAULT_MODE
+    return MODES.includes(mode) ? mode : DEFAULT_MODE
+  } catch {
+    return DEFAULT_MODE
+  }
+}
+
+async function handleSettings(env) {
+  const mode = await readMode(env)
+  let updatedAt = null
+  try {
+    updatedAt = Number(await env.VIDEOS.get('cfg:mode:at')) || null
+  } catch {
+    updatedAt = null
+  }
+  return json({ mode, modes: MODES, updatedAt }, 200, { 'Cache-Control': 'no-store' })
+}
+
+async function writeMode(env, mode) {
+  if (!MODES.includes(mode)) return false
+  await env.VIDEOS.put('cfg:mode', mode)
+  await env.VIDEOS.put('cfg:mode:at', String(Date.now()))
+  return true
+}
+
+/* -------------------------------- admin API ------------------------------- */
+
+function json(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-store',
+      ...extraHeaders,
+    },
+  })
+}
+
+function constantTimeEqual(a, b) {
+  const left = String(a || '')
+  const right = String(b || '')
+  if (left.length !== right.length) return false
+  let diff = 0
+  for (let index = 0; index < left.length; index += 1) {
+    diff |= left.charCodeAt(index) ^ right.charCodeAt(index)
+  }
+  return diff === 0
+}
+
+function adminAuthorised(request, env) {
+  if (!env.ADMIN_TOKEN) return false
+  const header = request.headers.get('authorization') || ''
+  const bearer = header.replace(/^Bearer\s+/i, '').trim()
+  return constantTimeEqual(bearer, env.ADMIN_TOKEN)
+}
+
+async function handleAdmin(request, env, url) {
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, content-type',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+  }
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+
+  if (!env.ADMIN_TOKEN) {
+    return json(
+      {
+        error: 'admin-disabled',
+        message:
+          'The dashboard needs an ADMIN_TOKEN secret on the Worker. Add one in Cloudflare ' +
+          '(Settings -> Variables and Secrets), deploy, then sign in with it.',
+      },
+      503,
+      cors,
+    )
+  }
+  if (!adminAuthorised(request, env)) {
+    return json({ error: 'unauthorised', message: 'Wrong or missing admin token.' }, 401, cors)
+  }
+
+  const path = url.pathname.replace(/^\/api\/admin\/?/, '')
+  const method = request.method
+  let body = {}
+  if (method === 'POST' || method === 'PATCH') {
+    try {
+      body = await request.json()
+    } catch {
+      body = {}
+    }
+  }
+
+  // --- settings ---------------------------------------------------------
+  if (path === 'settings' && method === 'GET') {
+    return json(
+      {
+        mode: await readMode(env),
+        modes: MODES,
+        updatedAt: Number(await env.VIDEOS.get('cfg:mode:at')) || null,
+        github: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO),
+        feedUrl: new URL(request.url).origin,
+      },
+      200,
+      cors,
+    )
+  }
+  if (path === 'settings' && method === 'POST') {
+    if (!(await writeMode(env, body.mode))) {
+      return json({ error: 'bad-mode', message: `mode must be one of ${MODES.join(', ')}` }, 400, cors)
+    }
+    return json({ ok: true, mode: await readMode(env), updatedAt: Date.now() }, 200, cors)
+  }
+
+  // --- videos ------------------------------------------------------------
+  if (path === 'videos' && method === 'GET') {
+    const ids = await readIndex(env)
+    const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+    return json(
+      {
+        videos: records.filter(Boolean).map((video) => ({
+          id: video.id,
+          title: video.title,
+          category: video.category,
+          tags: video.tags || [],
+          durationSec: video.durationSec || 0,
+          kind: video.kind || 'telegram',
+          tooLarge: Boolean(video.tooLarge),
+          sourceUrl: video.sourceUrl || null,
+          thumbUrl: video.thumbFileId
+            ? `${url.origin}/api/videos/${video.id}/thumb.jpg`
+            : video.thumbUrl || null,
+          streamUrl: video.kind === 'link' ? null : `${url.origin}/api/videos/${video.id}/stream.mp4`,
+          description: video.description || '',
+          site: video.site || '',
+          createdAt: video.createdAt || null,
+          updatedAt: video.updatedAt || null,
+        })),
+        total: records.filter(Boolean).length,
+      },
+      200,
+      cors,
+    )
+  }
+
+  const videoMatch = /^videos\/([A-Za-z0-9-]+)$/.exec(path)
+  if (videoMatch && (method === 'PATCH' || method === 'DELETE')) {
+    const id = videoMatch[1]
+    const existing = await readVideo(env, id)
+    if (!existing) return json({ error: 'not-found', message: `No video ${id}` }, 404, cors)
+
+    if (method === 'DELETE') {
+      await removeVideo(env, id)
+      return json({ ok: true, deleted: id }, 200, cors)
+    }
+
+    if (typeof body.title === 'string') {
+      const title = body.title.trim().slice(0, 180)
+      if (!title) return json({ error: 'bad-title', message: 'Title cannot be empty.' }, 400, cors)
+      existing.title = title
+    }
+    if (typeof body.category === 'string') {
+      if (!CATEGORIES.includes(body.category)) {
+        return json({ error: 'bad-category', message: `Unknown category ${body.category}` }, 400, cors)
+      }
+      existing.category = body.category
+    }
+    if (typeof body.description === 'string') {
+      existing.description = body.description.slice(0, 1200)
+    }
+    if (Array.isArray(body.tags)) {
+      existing.tags = body.tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 12)
+    }
+    existing.updatedAt = Date.now()
+    await env.VIDEOS.put(`v:${id}`, JSON.stringify(existing))
+    return json({ ok: true, video: { id, ...existing } }, 200, cors)
+  }
+
+  // --- drafts ------------------------------------------------------------
+  if (path === 'drafts' && method === 'GET') {
+    return json({ drafts: await listDrafts(env) }, 200, cors)
+  }
+  if (path === 'scrape' && method === 'POST') {
+    const result = await createDraftsFromUrl(env, body.url)
+    if (result.error) return json({ error: 'scrape-failed', message: result.error }, 422, cors)
+    return json({ ok: true, drafts: result.drafts, site: result.site, pageTitle: result.pageTitle }, 200, cors)
+  }
+  if (path === 'drafts/publish-all' && method === 'POST') {
+    const published = []
+    const drafts = await listDrafts(env)
+    const targets = body.ids?.length
+      ? drafts.filter((draft) => body.ids.includes(draft.id))
+      : drafts
+    for (const draft of targets) {
+      published.push(await publishDraft(env, draft))
+      await removeDraftEverywhere(env, draft.id)
+    }
+    return json({ ok: true, published: published.map((video) => ({ id: video.id, title: video.title })) }, 200, cors)
+  }
+
+  const draftMatch = /^drafts\/([A-Za-z0-9-]+)(\/publish)?$/.exec(path)
+  if (draftMatch) {
+    const id = draftMatch[1]
+    const draft = await readDraft(env, id)
+    if (!draft) return json({ error: 'not-found', message: 'Draft expired or already handled.' }, 404, cors)
+
+    if (draftMatch[2] && method === 'POST') {
+      const video = await publishDraft(env, draft)
+      await removeDraftEverywhere(env, id)
+      return json({ ok: true, video: { id: video.id, title: video.title } }, 200, cors)
+    }
+    if (method === 'PATCH') {
+      if (typeof body.title === 'string') {
+        const title = body.title.trim().slice(0, 180)
+        if (!title) return json({ error: 'bad-title', message: 'Title cannot be empty.' }, 400, cors)
+        draft.title = title
+      }
+      if (typeof body.category === 'string') {
+        if (!CATEGORIES.includes(body.category)) {
+          return json({ error: 'bad-category', message: `Unknown category ${body.category}` }, 400, cors)
+        }
+        draft.category = body.category
+      }
+      await env.VIDEOS.put(`draft:${id}`, JSON.stringify(draft))
+      return json({ ok: true, draft }, 200, cors)
+    }
+    if (method === 'DELETE') {
+      await removeDraftEverywhere(env, id)
+      return json({ ok: true, discarded: id }, 200, cors)
+    }
+  }
+
+  // --- rebuild (optional GitHub Actions trigger) -------------------------
+  if (path === 'rebuild' && method === 'POST') {
+    if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
+      return json(
+        {
+          error: 'rebuild-not-configured',
+          message:
+            'Add GITHUB_TOKEN and GITHUB_REPO Worker secrets to trigger a rebuild from here. ' +
+            'Until then, re-run the deploy workflow yourself after adding videos.',
+        },
+        503,
+        cors,
+      )
+    }
+    const [owner, repo] = String(env.GITHUB_REPO).split('/')
+    const workflow = env.GITHUB_WORKFLOW || 'deploy.yml'
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'afterdark-admin',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ref: env.GITHUB_BRANCH || 'main' }),
+      },
+    )
+    if (!response.ok) {
+      const detail = await response.text()
+      return json({ error: 'rebuild-failed', message: `GitHub returned ${response.status}: ${detail.slice(0, 200)}` }, 502, cors)
+    }
+    return json({ ok: true, message: 'Rebuild started. The sitemap updates in a minute or two.' }, 200, cors)
+  }
+
+  return json({ error: 'not-found', message: `Unknown admin endpoint ${path}` }, 404, cors)
+}
+
+async function listDrafts(env) {
+  const ids = await readDraftIndex(env)
+  const drafts = []
+  for (const id of ids) {
+    const draft = await readDraft(env, id)
+    if (draft) drafts.push(draft)
+  }
+  return drafts
 }
 
 /* --------------------------- media proxying ------------------------------ */
@@ -271,6 +570,7 @@ async function processCallback(query, env) {
   if (op === 'dx') return editMessage(env, chatId, query.message?.message_id, 'Delete cancelled.')
   if (op === 'g') return sendVideoList(env, chatId, Number(a) || 0)
   if (op === 'q') return editMessage(env, chatId, query.message?.message_id, 'Dismissed.')
+  if (op === 'mode') return setModeFromBot(env, chatId, a, query.message?.message_id)
   if (op === 'v') return sendCategoryPicker(env, chatId, a, 'video')
   if (op === 'V') return setVideoCategory(env, chatId, a, Number(b), query.message?.message_id)
 }
@@ -306,7 +606,7 @@ async function processMessage(msg, env) {
         '• Caption\'s first line becomes the title\n' +
         '• #Hashtags become tags; one matching a category (e.g. #POV, #Big_Ass) sets the category\n' +
         '• Videos must be 20 MB or smaller (Telegram bot limit)\n\n' +
-        'Commands: /videos · /pending · /add <url> · /rename <id> <title> · /remove <id> · /id\n' +
+        'Commands: /videos · /pending · /add <url> · /rename <id> <title> · /remove <id> · /mode · /id\n' +
         'Nothing scraped is published until you press ✅ Publish.')
     }
     if (command === '/id') {
@@ -315,6 +615,10 @@ async function processMessage(msg, env) {
     if (command === '/videos' || command === '/list') {
       if (!owner.isOwner) return deny(env, chatId, userId)
       return sendVideoList(env, chatId, 0)
+    }
+    if (command === '/mode') {
+      if (!owner.isOwner) return deny(env, chatId, userId)
+      return sendModePicker(env, chatId)
     }
     if (command === '/pending') {
       if (!owner.isOwner) return deny(env, chatId, userId)
@@ -836,32 +1140,39 @@ function scrapePage(html, pageUrl) {
   return { items: items.slice(0, MAX_BATCH_DRAFTS), site, pageTitle }
 }
 
-async function scrapeIntoDrafts(env, chatId, rawUrl) {
+/**
+ * Scrape a URL and store its videos as drafts.
+ * Shared by the bot and the admin dashboard: returns data, sends nothing.
+ * -> { error } | { drafts, site, pageTitle }
+ */
+async function createDraftsFromUrl(env, rawUrl) {
   const url = String(rawUrl || '').trim()
   if (!/^https?:\/\//i.test(url)) {
-    return send(env, chatId, 'That does not look like a link. It should start with http:// or https://')
+    return { error: 'That does not look like a link. It should start with http:// or https://' }
   }
-  await send(env, chatId, `🔎 Scraping ${url}\nThis can take a few seconds…`)
 
   const page = await fetchPage(url)
   if (page.error) {
-    return send(env, chatId,
-      `⚠️ I could not read that page (${page.error}).\n\n` +
-      'Many adult sites block server-side requests or require JavaScript. You can still add the video:\n' +
-      '• Paste the direct embed/player link (e.g. …/embed/abc123/)\n' +
-      '• Or forward the video file to me (≤ 20 MB)\n' +
-      '• Or send it in a public Telegram channel and share the t.me link')
+    return {
+      error:
+        `I could not read that page (${page.error}). Many adult sites block server-side ` +
+        'requests or require JavaScript. Paste the direct embed/player link instead ' +
+        '(e.g. …/embed/abc123/), or forward the video file to the bot.',
+    }
   }
 
   const parsed = scrapePage(page.html, page.finalUrl || url)
   if (!parsed.items.length) {
-    return send(env, chatId,
-      `🤔 I reached that page but found no video on it.\nTitle looked like: “${parsed.pageTitle || 'unknown'}”.\n` +
-      'Send the link to the video itself, or forward the file instead.')
+    return {
+      error:
+        `I reached that page but found no video on it` +
+        `${parsed.pageTitle ? ` (title: “${parsed.pageTitle}”)` : ''}. ` +
+        'Send the link to the video itself.',
+    }
   }
 
   const batchId = `b${randomId(8)}`
-  const draftIds = []
+  const drafts = []
   for (const item of parsed.items) {
     const draft = {
       id: `d${randomId(9)}`,
@@ -880,33 +1191,37 @@ async function scrapeIntoDrafts(env, chatId, rawUrl) {
     }
     await env.VIDEOS.put(`draft:${draft.id}`, JSON.stringify(draft))
     await addDraftToIndex(env, draft.id)
-    draftIds.push(draft.id)
+    drafts.push(draft)
   }
   await trimDrafts(env)
-  await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(draftIds))
+  await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(drafts.map((draft) => draft.id)))
 
-  if (draftIds.length === 1) {
-    const draft = await readDraft(env, draftIds[0])
-    await sendDraftCard(env, chatId, draft)
-    return
-  }
+  return { drafts, site: parsed.site, pageTitle: parsed.pageTitle }
+}
 
-  const lines = draftIds.slice(0, 15).map((id, index) => {
-    const item = parsed.items[index] || {}
-    return `${index + 1}. ${previewTitleFor(item)}\n    ${item.category || DEFAULT_CATEGORY}`
-  })
-  const more = draftIds.length > 15 ? `\n…and ${draftIds.length - 15} more.` : ''
+/** Bot wrapper around createDraftsFromUrl: sends the review cards. */
+async function scrapeIntoDrafts(env, chatId, rawUrl) {
+  await send(env, chatId, `🔎 Scraping ${rawUrl}\nThis can take a few seconds…`)
+
+  const result = await createDraftsFromUrl(env, rawUrl)
+  if (result.error) return send(env, chatId, `⚠️ ${result.error}`)
+
+  const { drafts } = result
+  if (drafts.length === 1) return sendDraftCard(env, chatId, drafts[0])
+
+  const lines = drafts.slice(0, 15).map(
+    (draft, index) => `${index + 1}. ${previewTitleFor(draft)}\n    ${draft.category || DEFAULT_CATEGORY}`,
+  )
+  const more = drafts.length > 15 ? `\n…and ${drafts.length - 15} more.` : ''
   return sendWithKeyboard(env, chatId,
-    `🔎 Found ${draftIds.length} videos on ${parsed.site || 'that page'}.\n\n` +
+    `🔎 Found ${drafts.length} videos on ${result.site || 'that page'}.\n\n` +
     `${lines.join('\n')}${more}\n\n` +
     'Nothing is published yet. Publish them all, or review one by one.',
     [
+      [{ text: `✅ Publish all (${drafts.length})`, callback_data: `aa:${drafts[0].batchId}` }],
       [
-        { text: `✅ Publish all (${draftIds.length})`, callback_data: `aa:${batchId}` },
-      ],
-      [
-        { text: '🔎 Review each', callback_data: `ar:${batchId}` },
-        { text: '❌ Cancel all', callback_data: `ca:${batchId}` },
+        { text: '🔎 Review each', callback_data: `ar:${drafts[0].batchId}` },
+        { text: '❌ Cancel all', callback_data: `ca:${drafts[0].batchId}` },
       ],
     ])
 }
@@ -1134,7 +1449,12 @@ async function sendVideoList(env, chatId, page = 0) {
   const current = Math.min(Math.max(0, page), pages - 1)
   const slice = ids.slice(current * LIST_PAGE_SIZE, current * LIST_PAGE_SIZE + LIST_PAGE_SIZE)
 
-  const lines = [`🎬 Videos published by this bot — page ${current + 1}/${pages} (${ids.length} total)`, '']
+  const mode = await readMode(env)
+  const lines = [
+    `🎬 Videos published by this bot — page ${current + 1}/${pages} (${ids.length} total)`,
+    `⚙️ Site mode: ${mode === 'direct' ? 'Direct links only' : 'Public catalogue'} (/mode)`,
+    '',
+  ]
   const keyboard = []
   for (const [offset, id] of slice.entries()) {
     const video = await readVideo(env, id)
@@ -1158,6 +1478,50 @@ async function sendVideoList(env, chatId, page = 0) {
   if (nav.length) keyboard.push(nav)
 
   return sendWithKeyboard(env, chatId, truncate(lines.join('\n'), TEXT_LIMIT), keyboard)
+}
+
+/**
+ * Site mode switch. `public` is the normal tube catalogue (home feed,
+ * categories, related videos); `direct` turns the site into link-only video
+ * pages discovered through sitemap.xml. The setting lives in KV and the site
+ * reads it at runtime, so switching needs no rebuild.
+ */
+async function sendModePicker(env, chatId) {
+  const mode = await readMode(env)
+  const mark = (value) => (mode === value ? '✓ ' : '')
+  return sendWithKeyboard(env, chatId,
+    `⚙️ Site mode: ${mode === 'direct' ? 'Direct links only' : 'Public catalogue'}\n\n` +
+    '• Public catalogue — home feed, categories, search and related videos\n' +
+    '• Direct links only — every video opens only from its own link, no navigation, ' +
+    'no related videos; Google/Bing find the pages through sitemap.xml\n\n' +
+    'You can switch any time; links keep working in both modes.',
+    [
+      [
+        { text: `${mark('public')}Public catalogue`, callback_data: 'mode:public' },
+        { text: `${mark('direct')}Direct links only`, callback_data: 'mode:direct' },
+      ],
+      [{ text: '📊 Admin dashboard', callback_data: 'mode:dashboard' }],
+    ])
+}
+
+async function setModeFromBot(env, chatId, mode, messageId) {
+  if (mode === 'dashboard') {
+    return send(env, chatId,
+      '📊 The dashboard is a web page on the site: /admin\n' +
+      'Sign in with the ADMIN_TOKEN you set on the Worker. It can do everything here — ' +
+      'list, rename, delete, scrape links, review drafts and switch this mode.')
+  }
+  if (!(await writeMode(env, mode))) return send(env, chatId, 'Unknown mode.')
+  if (messageId) {
+    await editMessage(env, chatId,
+      messageId,
+      `⚙️ Site mode set to ${mode === 'direct' ? 'Direct links only' : 'Public catalogue'}.\n` +
+      (mode === 'direct'
+        ? 'The home page and menus are hidden; each video is reachable only by its own link. sitemap.xml lists them for search engines.'
+        : 'The normal catalogue is back, with the home feed and related videos.'))
+    return
+  }
+  return send(env, chatId, `⚙️ Mode set to ${mode}.`)
 }
 
 async function beginRename(env, chatId, userId, videoId) {
