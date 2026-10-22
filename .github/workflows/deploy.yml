@@ -57,3 +57,58 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # Crawlers must get a 200 for every sitemap URL and a noindex root, so
+      # check the live deployment instead of assuming the host behaves. Pages
+      # can take a minute to propagate, hence the retries.
+      - name: Smoke-test the deployed site
+        env:
+          SITE_URL: ${{ vars.VITE_SITE_URL }}
+        run: |
+          set -uo pipefail
+          BASE="${SITE_URL:-https://nior122.github.io/Faceverify}"
+          BASE="${BASE%/}"
+          echo "Checking $BASE"
+          fail=0
+
+          # Wait for a URL to answer 200 (Pages propagation), then echo the code.
+          wait_for_200() {
+            local url="$1" code="000"
+            for _ in $(seq 1 18); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+              [ "$code" = "200" ] && break
+              sleep 10
+            done
+            echo "$code"
+          }
+
+          root=$(wait_for_200 "$BASE/")
+          echo "root: $root"
+          [ "$root" = "200" ] || fail=1
+
+          if ! curl -sf "$BASE/" | grep -q 'name="robots" content="noindex'; then
+            echo "root is not noindex"
+            fail=1
+          fi
+
+          if ! curl -sf "$BASE/robots.txt" | grep -q "Sitemap: $BASE/sitemap.xml"; then
+            echo "robots.txt does not point at the sitemap"
+            fail=1
+          fi
+
+          if curl -sf "$BASE/sitemap.xml" -o sitemap.xml; then
+            while read -r loc; do
+              code=$(wait_for_200 "$loc")
+              echo "$code $loc"
+              [ "$code" = "200" ] || fail=1
+            done < <(grep -o '<loc>[^<]*</loc>' sitemap.xml | sed 's|</\?loc>||g')
+          else
+            echo "sitemap.xml is not reachable"
+            fail=1
+          fi
+
+          if [ "$fail" != "0" ]; then
+            echo "::error::Live site checks failed"
+            exit 1
+          fi
+          echo "All live checks passed"
