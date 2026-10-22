@@ -134,6 +134,30 @@ console.log('— direct mode without a URL, and failure modes')
   check('non-http URL is ignored', bad.status === 200)
 }
 
+console.log('— a hung Worker is cut off, never waited on')
+{
+  // Black-holed origin: the request only settles when the caller aborts it.
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    if (url !== `${WORKER}/api/settings`) return new Response('unexpected fetch ' + url, { status: 500 })
+    return new Promise((_resolve, reject) => {
+      const signal = init && init.signal
+      if (signal && typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+      }
+    })
+  }
+  const startedAt = Date.now()
+  const raced = await Promise.race([
+    onRequest(context('/', { settings: null })),
+    new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 6000)),
+  ])
+  const elapsed = Date.now() - startedAt
+  check('hung Worker is cut off instead of hanging the navigation', raced !== 'TIMEOUT' && raced.status === 200,
+    raced === 'TIMEOUT' ? 'the page request was still waiting' : '')
+  check('cutoff happens within the timeout budget', elapsed < 5000, `${elapsed}ms`)
+}
+
 console.log('— no feed origin configured')
 {
   globalThis.fetch = realFetch

@@ -73,6 +73,10 @@ async function readSettings(origin: string): Promise<Settings | null> {
       // One request per minute at most, not one per visitor.
       cf: { cacheTtl: CACHE_TTL_SECONDS, cacheEverything: true },
       headers: { Accept: 'application/json' },
+      // Never let a hung Worker hang the site: after this grace period the
+      // request is cut and the static page is served (the client re-fetches
+      // settings with its own timeout).
+      signal: AbortSignal.timeout(2000),
     } as RequestInit)
     if (!response.ok) return null
     return (await response.json()) as Settings
