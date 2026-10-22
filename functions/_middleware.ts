@@ -16,7 +16,9 @@
  *
  * If the Worker is unreachable (or `VITE_TELEGRAM_FEED_URL` is not set on the
  * Pages project) every rule falls through to the normal static site: no
- * redirects, no surprises.
+ * redirects, no surprises. The dashboard is exempt from all of it: `/admin`
+ * and `/admin/` answer as a plain `200` before anything is fetched, so a
+ * browser-cached redirect can never lock the owner out of the site's controls.
  */
 
 interface Env {
@@ -57,6 +59,8 @@ const EXCLUDED_FILES = new Set([
 
 const VIDEO_PATH = /^\/v\/(?:[^/]+\/?)?$/
 const VIDEO_ANY = /^\/v\//
+/** The dashboard's two canonical URL variants — served with a 200, never a 308. */
+const ADMIN_PATH = /^\/admin\/?$/
 /** Anything with a file extension is an asset request, never a page. */
 const HAS_EXTENSION = /\.[a-z0-9]{2,5}$/i
 
@@ -137,6 +141,27 @@ export async function onRequest(context: Context): Promise<Response> {
   const url = new URL(request.url)
 
   if (request.method !== 'GET' && request.method !== 'HEAD') return context.next()
+
+  // The dashboard must never bounce — not even on the trailing-slash 308 Pages
+  // issues for '/admin'. A 308 is permanent: browsers cache it and replay it
+  // without asking the network, so one stale entry can keep a broken redirect
+  // on the owner's admin URL forever, no matter what this site ships later.
+  // Serving the prerendered file directly (200, no-store) for both variants
+  // removes the cacheable hop entirely, and keeps '/admin' loadable even when
+  // the Worker is unreachable — this branch runs before any settings read.
+  if (ADMIN_PATH.test(url.pathname) && context.env.ASSETS) {
+    const shell = await context.env.ASSETS.fetch(new URL('/admin/index.html', url).toString())
+    if (shell.ok) {
+      return new Response(request.method === 'HEAD' ? null : shell.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex',
+        },
+      })
+    }
+  }
 
   if (VIDEO_ANY.test(url.pathname)) return serveVideo(context, url)
 

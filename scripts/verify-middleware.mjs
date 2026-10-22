@@ -42,7 +42,7 @@ const check = (name, condition, extra = '') => {
 }
 
 /** Make a context; `next` returns 200 unless `missing` says 404. */
-function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true } = {}) {
+function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true, slash308 = false } = {}) {
   const url = `${SITE}${path}`
   return {
     request: new Request(url, { method, headers: { accept } }),
@@ -58,7 +58,12 @@ function context(path, { settings = null, accept = 'text/html', method = 'GET', 
             : new Response('missing', { status: 404 }),
       },
     },
-    next: async () => new Response('STATIC', { status: missing.includes(path) ? 404 : 200 }),
+    // `slash308` impersonates Pages' trailing-slash normalization, which a
+    // static site would answer for '/admin' with a browser-cacheable 308.
+    next: async () =>
+      slash308 && path === '/admin'
+        ? new Response(null, { status: 308, headers: { Location: `${url}/` } })
+        : new Response('STATIC', { status: missing.includes(path) ? 404 : 200 }),
     _settings: settings,
   }
 }
@@ -132,6 +137,43 @@ console.log('— direct mode without a URL, and failure modes')
 
   const bad = await run('/', { settings: { mode: 'direct', redirectUrl: 'javascript:alert(1)', ads: { enabled: false } } })
   check('non-http URL is ignored', bad.status === 200)
+}
+
+console.log('— the dashboard is never redirected or bounced')
+{
+  const settings = { mode: 'direct', redirectUrl: 'https://elsewhere.example/go', ads: { enabled: false } }
+  let settingsCalls = 0
+  globalThis.fetch = async () => {
+    settingsCalls += 1
+    return Response.json(settings)
+  }
+  const direct = await onRequest(context('/admin', { slash308: true }))
+  const directHtml = await direct.text()
+  globalThis.fetch = realFetch
+
+  check('GET /admin answers 200 — no 308 the browser could cache', direct.status === 200, `${direct.status}`)
+  check('the dashboard file is served directly', directHtml.includes('SHELL'))
+  check('the admin path never waits on the Worker', settingsCalls === 0, `${settingsCalls} fetch(es)`)
+  check('admin replies are not cacheable', (direct.headers.get('cache-control') || '').includes('no-store'))
+  check('admin stays noindex', (direct.headers.get('x-robots-tag') || '').includes('noindex'))
+
+  const slashed = await run('/admin/', { settings })
+  check('GET /admin/ is a direct 200 too', slashed.status === 200, `${slashed.status}`)
+
+  const head = await run('/admin', { settings, method: 'HEAD' })
+  check('HEAD /admin answers 200 without a body', head.status === 200 && (await head.text()) === '')
+
+  globalThis.fetch = async (input) => {
+    const url = String(input)
+    if (url === `${WORKER}/api/settings`) return Promise.reject(new Error('offline'))
+    return new Response('unexpected fetch ' + url, { status: 500 })
+  }
+  const offline = await onRequest(context('/admin', { slash308: true }))
+  check('the dashboard loads even while the Worker is offline', offline.status === 200)
+  globalThis.fetch = realFetch
+
+  const noFile = await onRequest(context('/admin', { shell: false, slash308: true }))
+  check('without a prerendered dashboard file the normal site flow applies', noFile.status === 308, `${noFile.status}`)
 }
 
 console.log('— a hung Worker is cut off, never waited on')

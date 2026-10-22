@@ -68,7 +68,10 @@ external link (an ad/affiliate offer, say). It is a **real 302** issued by
 networks see genuine traffic. Never redirected: video pages `/v/<id>/`, the dashboard
 `/admin`, `sitemap.xml`, `robots.txt` and every asset. With no URL set, the home page shows the
 neutral 18+ page instead. Set it from the dashboard (**Site mode → Home-page redirect**) or with
-`/redirect <url>` in the bot; `/redirect off` clears it.
+`/redirect <url>` in the bot; `/redirect off` clears it. The dashboard is served as a plain `200`
+at both `/admin` and `/admin/`, skipping even Pages' permanent trailing-slash `308` — browsers
+cache 308s forever, and one stale entry would keep bouncing the admin URL without asking the
+network; the redirect-free replies keep the owner's route to the controls clean.
 
 **Every video, old or new.** Videos posted after a build have no prerendered file; the middleware
 serves them a shell with a **200** and the app renders them from the live feed, so a link works
@@ -190,11 +193,14 @@ baked into the build, so none of it needs a rebuild:
   outlines every slot on the live site without running third-party code (see [Ads](#ads)).
 - **Views** — per-video counters in KV surfaced in the feed, the admin API and the Videos tab,
   with a total (see [View counting](#view-counting)).
-- **No infinite spinners** — every dashboard call to the Worker runs under a deadline (15 s, 30 s
-  for scrapes) and page-level settings reads are cut off after 2 s, so a Worker that accepts the
-  connection but never answers produces a one-line actionable error instead of a page stuck on
-  "Checking…". The message names what to check: the Worker's `/health` and the Pages build
-  variable `VITE_TELEGRAM_FEED_URL`.
+- **No infinite spinners, no dashboard bounce** — every dashboard call to the Worker runs under a
+  deadline (15 s, 30 s for scrapes) and page-level settings reads are cut off after 2 s, so a
+  Worker that accepts the connection but never answers produces a one-line actionable error
+  instead of a page stuck on "Checking…"; the message names what to check: the Worker's `/health`
+  and the Pages build variable `VITE_TELEGRAM_FEED_URL`. Independently, `/admin` and `/admin/`
+  are served as a plain `200` by the middleware before anything is fetched: the dashboard never
+  sees a redirect — not even Pages' permanent trailing-slash `308`, which a browser that cached
+  an older one would otherwise replay forever without touching the network.
 
 ## Screens
 
@@ -344,7 +350,7 @@ is dark and `<div id="root">` is empty. Check, in this order:
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
 | `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in, a stalled Worker surfacing the timeout message instead of "Checking…", and the signed-in videos table with views), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
-| `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, failure modes, and that a hung Worker is cut off instead of hanging the navigation |
+| `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, the dashboard served with a redirect-free `200` (even offline), and that a hung Worker is cut off instead of hanging the navigation |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 
 ## Deployment
