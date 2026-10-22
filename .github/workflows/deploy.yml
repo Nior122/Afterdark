@@ -57,3 +57,38 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # Crawlers must get a 200 for every sitemap URL and a noindex root, so
+      # check the live deployment instead of assuming the host behaves.
+      - name: Smoke-test the deployed site
+        env:
+          SITE_URL: ${{ vars.VITE_SITE_URL }}
+        run: |
+          set -uo pipefail
+          BASE="${SITE_URL:-https://nior122.github.io/Faceverify}"
+          BASE="${BASE%/}"
+          echo "Checking $BASE"
+          fail=0
+
+          status() {
+            curl -s -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 12 "$1"
+          }
+
+          root=$(status "$BASE/")
+          echo "root: $root"
+          [ "$root" = "200" ] || fail=1
+          curl -sf "$BASE/" | grep -q 'name="robots" content="noindex' || { echo "root is not noindex"; fail=1; }
+
+          curl -sf "$BASE/robots.txt" | grep -q "Sitemap: $BASE/sitemap.xml" || { echo "robots.txt does not point at the sitemap"; fail=1; }
+
+          curl -sf "$BASE/sitemap.xml" -o sitemap.xml || { echo "sitemap.xml is not reachable"; fail=1; }
+          if [ -f sitemap.xml ]; then
+            while read -r loc; do
+              code=$(status "$loc")
+              echo "$code $loc"
+              [ "$code" = "200" ] || fail=1
+            done < <(grep -o '<loc>[^<]*</loc>' sitemap.xml | sed 's|</\?loc>||g')
+          fi
+
+          [ "$fail" = "0" ] || { echo "::error::Live site checks failed"; exit 1; }
+          echo "All live checks passed"
