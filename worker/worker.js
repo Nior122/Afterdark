@@ -18,9 +18,14 @@
  * Endpoints
  * ---------
  *   POST /telegram/webhook         Telegram updates (messages, channel posts, buttons)
- *   GET  /api/videos               Public feed consumed by the website
+ *   GET  /api/videos               Public feed consumed by the website (includes `views`)
+ *   POST /api/videos/:id/view      Count a video view (deduped per browser session)
  *   GET  /api/videos/:id/stream.mp4  Video stream proxy (Range supported)
  *   GET  /api/videos/:id/thumb.jpg   Thumbnail proxy (the video's real poster)
+ *   GET  /api/settings             Runtime site config: mode, redirect, ads
+ *   /api/admin/*                   Dashboard API (Bearer ADMIN_TOKEN): videos incl.
+ *                                  view counts, bulk delete/recategorise, drafts,
+ *                                  per-URL scrape (duplicates reported), settings
  *   GET  /health                   "ok"
  *
  * Required configuration (Cloudflare dashboard -> Worker -> Settings)
@@ -104,6 +109,20 @@ export default {
       return handleFeed(env, url.origin)
     }
 
+    // CORS preflight for the public /api/ endpoints (the site POSTs a JSON
+    // body to /view, which browsers preflight when the origins differ).
+    // /api/admin answers its own preflight — it needs `authorization` allowed.
+    if (pathname.startsWith('/api/') && !pathname.startsWith('/api/admin') && request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: PUBLIC_API_CORS })
+    }
+
+    // Public view counter: POST /api/videos/:id/view { session } — deduped per
+    // browser session so a reload does not inflate the dashboard.
+    const view = pathname.match(/^\/api\/videos\/([A-Za-z0-9-]+)\/view$/)
+    if (view && request.method === 'POST') {
+      return handleView(env, view[1], request)
+    }
+
     // Public site settings: which of the two modes the site renders.
     if (pathname === '/api/settings' && request.method === 'GET') {
       return handleSettings(env)
@@ -128,9 +147,21 @@ export default {
 
 /* ------------------------------ public feed ------------------------------ */
 
+/** CORS for the unauthenticated public /api/ endpoints (feed, view POSTs). */
+const PUBLIC_API_CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Max-Age': '86400',
+}
+
 async function handleFeed(env, origin) {
   const ids = await readIndex(env)
-  const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+  const [records, counts] = await Promise.all([
+    Promise.all(ids.map((id) => readVideo(env, id))),
+    Promise.all(ids.map((id) => readViewCount(env, id))),
+  ])
+  const viewsById = new Map(ids.map((id, index) => [id, counts[index] || 0]))
   const videos = records
     .filter((v) => v && !v.tooLarge)
     .map((v) => {
@@ -147,6 +178,10 @@ async function handleFeed(env, origin) {
         updatedAt: v.updatedAt || null,
         description: v.description || '',
         site: v.site || '',
+        // Real views counted through POST /api/videos/:id/view. The site shows
+        // its derived placeholder while this is 0, so freshly published
+        // videos never look dead.
+        views: viewsById.get(v.id) || 0,
         sourceUrl: isLink ? v.sourceUrl : null,
         streamUrl: isLink ? null : `${origin}/api/videos/${v.id}/stream.mp4`,
         thumbUrl: v.thumbFileId
@@ -162,6 +197,71 @@ async function handleFeed(env, origin) {
     },
   })
 }
+
+/* --------------------------------- views ---------------------------------- */
+
+/**
+ * A per-video view counter lives in KV (`views:<id>`, a plain integer), and
+ * each counting POST is deduped per browser session: the client generates a
+ * random session id (sessionStorage), and the first view of a video by that
+ * session writes a marker key `view:<id>:<hash(session)>` with a 24 h TTL.
+ * Repeats within the window return `counted: false` without touching the
+ * counter. KV has no atomic increment — concurrent requests can lose a
+ * count, which is acceptable for a dashboard metric.
+ */
+const VIEW_DEDUPE_TTL_SEC = 24 * 60 * 60
+const VIEW_ANON_WINDOW_MS = 10 * 60 * 1000 // no session id: still not unlimited
+
+async function readViewCount(env, id) {
+  try {
+    return Number(await env.VIDEOS.get(`views:${id}`)) || 0
+  } catch {
+    return 0
+  }
+}
+
+/** Counts one view; returns { counted, views }. */
+async function registerView(env, id, rawSession) {
+  const session = String(rawSession || '').trim()
+  const marker = /^[A-Za-z0-9_-]{6,64}$/.test(session)
+    ? `view:${id}:${await shortHash(session)}`
+    : // A POST without a usable session id still cannot be an open counter:
+      // fall back to a coarse shared window (once per 10 min per video).
+      `view:${id}:anon:${Math.floor(Date.now() / VIEW_ANON_WINDOW_MS)}`
+  try {
+    if (await env.VIDEOS.get(marker)) {
+      return { counted: false, views: await readViewCount(env, id) }
+    }
+  } catch {
+    /* a failed marker read counts as "not seen" — the put below still dedupes later */
+  }
+  const views = (await readViewCount(env, id)) + 1
+  await env.VIDEOS.put(`views:${id}`, String(views))
+  const ttl = marker.includes(':anon:')
+    ? Math.ceil(VIEW_ANON_WINDOW_MS / 1000) + 60
+    : VIEW_DEDUPE_TTL_SEC
+  try {
+    await env.VIDEOS.put(marker, '1', { expirationTtl: ttl })
+  } catch {
+    try { await env.VIDEOS.put(marker, '1') } catch { /* best effort */ }
+  }
+  return { counted: true, views }
+}
+
+async function handleView(env, id, request) {
+  const video = await readVideo(env, id)
+  if (!video) return json({ error: 'not-found', message: `No video ${id}` }, 404, PUBLIC_API_CORS)
+  let session = ''
+  try {
+    const body = await request.json()
+    session = String(body?.session ?? '')
+  } catch {
+    /* tolerate an empty POST */
+  }
+  const { counted, views } = await registerView(env, id, session)
+  return json({ ok: true, counted, views }, 200, PUBLIC_API_CORS)
+}
+
 
 /* ------------------------------- settings -------------------------------- */
 
@@ -257,13 +357,22 @@ async function writeRedirect(env, url) {
  *   footer   above the footer
  *   video    under the player on a video page
  *   popunder a single global script (popunder / interstitial networks)
+ *
+ * Two switches on top of the code: `enabled` is the global one, `slotsOn`
+ * enables each slot individually (a slot shows only when both are on), and
+ * `preview` makes the site draw dashed outline boxes where the slots sit
+ * without executing any ad code — placement checking before going live.
+ * All three live in the same KV blob, so toggling needs no rebuild.
  */
 const AD_SLOTS = ['header', 'native', 'sidebar', 'footer', 'video', 'popunder']
 const MAX_AD_CODE = 20000
 
 function emptyAds() {
-  const ads = { enabled: false }
-  for (const slot of AD_SLOTS) ads[slot] = ''
+  const ads = { enabled: false, preview: false, slotsOn: {} }
+  for (const slot of AD_SLOTS) {
+    ads[slot] = ''
+    ads.slotsOn[slot] = true
+  }
   return ads
 }
 
@@ -274,8 +383,11 @@ async function readAds(env) {
     if (!raw) return ads
     const parsed = JSON.parse(raw)
     ads.enabled = Boolean(parsed.enabled)
+    ads.preview = Boolean(parsed.preview)
     for (const slot of AD_SLOTS) {
       if (typeof parsed[slot] === 'string') ads[slot] = parsed[slot]
+      // Slots saved before per-slot toggles existed stay enabled.
+      if (typeof parsed.slotsOn?.[slot] === 'boolean') ads.slotsOn[slot] = parsed.slotsOn[slot]
     }
     return ads
   } catch {
@@ -287,6 +399,13 @@ async function readAds(env) {
 async function writeAds(env, patch) {
   const next = await readAds(env)
   if (patch && typeof patch.enabled === 'boolean') next.enabled = patch.enabled
+  if (patch && typeof patch.preview === 'boolean') next.preview = patch.preview
+  if (patch && patch.slotsOn && typeof patch.slotsOn === 'object' && !Array.isArray(patch.slotsOn)) {
+    for (const slot of AD_SLOTS) {
+      const value = patch.slotsOn[slot]
+      if (typeof value === 'boolean') next.slotsOn[slot] = value
+    }
+  }
   for (const slot of AD_SLOTS) {
     const value = patch?.[slot]
     if (value === undefined) continue
@@ -340,6 +459,18 @@ async function handleAdmin(request, env, url) {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   }
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+
+  /** Selection from the dashboard: strings, de-duplicated, capped per call. */
+  const bulkIds = (value, limit = 200) => {
+    if (!Array.isArray(value)) return []
+    const seen = new Set()
+    for (const entry of value) {
+      const id = String(entry || '').trim()
+      if (id) seen.add(id)
+      if (seen.size >= limit) break
+    }
+    return [...seen]
+  }
 
   if (!env.ADMIN_TOKEN) {
     return json(
@@ -406,10 +537,15 @@ async function handleAdmin(request, env, url) {
   // --- videos ------------------------------------------------------------
   if (path === 'videos' && method === 'GET') {
     const ids = await readIndex(env)
-    const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+    const [records, counts] = await Promise.all([
+      Promise.all(ids.map((id) => readVideo(env, id))),
+      Promise.all(ids.map((id) => readViewCount(env, id))),
+    ])
+    const viewsById = new Map(ids.map((id, index) => [id, counts[index] || 0]))
+    const list = records.filter(Boolean)
     return json(
       {
-        videos: records.filter(Boolean).map((video) => ({
+        videos: list.map((video) => ({
           id: video.id,
           title: video.title,
           category: video.category,
@@ -417,6 +553,7 @@ async function handleAdmin(request, env, url) {
           durationSec: video.durationSec || 0,
           kind: video.kind || 'telegram',
           tooLarge: Boolean(video.tooLarge),
+          views: viewsById.get(video.id) || 0,
           sourceUrl: video.sourceUrl || null,
           thumbUrl: video.thumbFileId
             ? `${url.origin}/api/videos/${video.id}/thumb.jpg`
@@ -427,11 +564,55 @@ async function handleAdmin(request, env, url) {
           createdAt: video.createdAt || null,
           updatedAt: video.updatedAt || null,
         })),
-        total: records.filter(Boolean).length,
+        total: list.length,
+        viewsTotal: list.reduce((sum, video) => sum + (viewsById.get(video.id) || 0), 0),
       },
       200,
       cors,
     )
+  }
+
+  // Bulk operations over the selection in the dashboard's Videos tab. One
+  // call carries up to 200 ids; the client chunks anything larger.
+  if (path === 'videos/bulk-delete' && method === 'POST') {
+    const ids = bulkIds(body.ids)
+    if (!ids.length) {
+      return json({ error: 'no-ids', message: 'Send "ids": an array of video ids (max 200 per call).' }, 400, cors)
+    }
+    const deleted = []
+    const missing = []
+    for (const id of ids) {
+      if (await removeVideo(env, id)) deleted.push(id)
+      else missing.push(id)
+    }
+    return json({ ok: true, deleted, missing }, 200, cors)
+  }
+  if (path === 'videos/bulk-patch' && method === 'POST') {
+    const ids = bulkIds(body.ids)
+    if (!ids.length) {
+      return json({ error: 'no-ids', message: 'Send "ids": an array of video ids (max 200 per call).' }, 400, cors)
+    }
+    if (typeof body.category !== 'string' || !CATEGORIES.includes(body.category)) {
+      return json(
+        { error: 'bad-category', message: `Unknown category ${body.category === undefined ? '(missing)' : body.category}` },
+        400,
+        cors,
+      )
+    }
+    const updated = []
+    const missing = []
+    for (const id of ids) {
+      const video = await readVideo(env, id)
+      if (!video) {
+        missing.push(id)
+        continue
+      }
+      video.category = body.category
+      video.updatedAt = Date.now()
+      await env.VIDEOS.put(`v:${id}`, JSON.stringify(video))
+      updated.push(id)
+    }
+    return json({ ok: true, updated, missing, category: body.category }, 200, cors)
   }
 
   const videoMatch = /^videos\/([A-Za-z0-9-]+)$/.exec(path)
@@ -474,7 +655,19 @@ async function handleAdmin(request, env, url) {
   if (path === 'scrape' && method === 'POST') {
     const result = await createDraftsFromUrl(env, body.url)
     if (result.error) return json({ error: 'scrape-failed', message: result.error }, 422, cors)
-    return json({ ok: true, drafts: result.drafts, site: result.site, pageTitle: result.pageTitle }, 200, cors)
+    return json(
+      {
+        ok: true,
+        drafts: result.drafts,
+        // Videos skipped because the same source URL is already published or
+        // waiting in drafts — the dashboard's bulk scrape shows this per URL.
+        duplicates: result.duplicates || 0,
+        site: result.site,
+        pageTitle: result.pageTitle,
+      },
+      200,
+      cors,
+    )
   }
   if (path === 'drafts/publish-all' && method === 'POST') {
     const published = []
@@ -487,6 +680,19 @@ async function handleAdmin(request, env, url) {
       await removeDraftEverywhere(env, draft.id)
     }
     return json({ ok: true, published: published.map((video) => ({ id: video.id, title: video.title })) }, 200, cors)
+  }
+  // Bulk discard for the dashboard's bulk scrape: remove the given drafts
+  // (or every pending draft when no ids are sent). Nothing is published.
+  if (path === 'drafts/discard-all' && method === 'POST') {
+    const ids = bulkIds(body.ids, 200)
+    const drafts = await listDrafts(env)
+    const targets = ids.length ? drafts.filter((draft) => ids.includes(draft.id)) : drafts
+    const discarded = []
+    for (const draft of targets) {
+      await removeDraftEverywhere(env, draft.id)
+      discarded.push(draft.id)
+    }
+    return json({ ok: true, discarded }, 200, cors)
   }
 
   const draftMatch = /^drafts\/([A-Za-z0-9-]+)(\/publish)?$/.exec(path)
@@ -780,14 +986,17 @@ async function processMessage(msg, env) {
       if (!owner.isOwner) return deny(env, chatId, userId)
       const ads = await readAds(env)
       const filled = AD_SLOTS.filter((slot) => ads[slot])
+      const showing = AD_SLOTS.filter((slot) => ads[slot] && ads.slotsOn[slot])
+      const hidden = AD_SLOTS.filter((slot) => ads[slot] && !ads.slotsOn[slot])
       const wanted = arg.toLowerCase()
       if (!wanted) {
         return send(env, chatId,
-          `📢 Ads are ${ads.enabled ? 'ON' : 'OFF'}.\n` +
+          `📢 Ads are ${ads.enabled ? 'ON' : 'OFF'}.${ads.preview ? ' (preview outlines ON — no code runs)' : ''}\n` +
           (filled.length
             ? `Slots with code: ${filled.join(', ')}\n`
             : 'No ad code yet — paste it in the dashboard under the Ads tab.\n') +
-          '\n/ads on · /ads off — the code itself is edited in the dashboard (/admin).')
+          (hidden.length ? `Hidden by their per-slot switch: ${hidden.join(', ')}\n` : '') +
+          '\n/ads on · /ads off — the code and the per-slot switches are edited in the dashboard (/admin).')
       }
       if (wanted !== 'on' && wanted !== 'off') {
         return send(env, chatId, 'Usage: /ads on or /ads off. Paste the ad code in the dashboard Ads tab.')
@@ -797,7 +1006,11 @@ async function processMessage(msg, env) {
       return send(env, chatId,
         wanted === 'on'
           ? '✅ Ads are ON for every page.\n' +
-            (filled.length ? `Showing: ${filled.join(', ')}.` : 'No ad code saved yet — add it in /admin → Ads.')
+            (showing.length
+              ? `Showing: ${showing.join(', ')}.${hidden.length ? `\n${hidden.join(', ')} stay hidden (per-slot switch off).` : ''}`
+              : filled.length
+                ? 'Every filled slot is switched off individually — enable them in /admin → Ads.'
+                : 'No ad code saved yet — add it in /admin → Ads.')
           : '✅ Ads are OFF. The saved code is kept; switch them back on any time with /ads on.')
     }
     if (command === '/pending') {
@@ -1351,9 +1564,19 @@ async function createDraftsFromUrl(env, rawUrl) {
     }
   }
 
+  // Skip anything already published or sitting in a pending draft with the
+  // same source URL: a bulk re-scrape should say "duplicate", not double-post.
+  const known = await collectSourceUrls(env)
   const batchId = `b${randomId(8)}`
   const drafts = []
+  let duplicates = 0
   for (const item of parsed.items) {
+    const key = normaliseSourceUrl(item.sourceUrl)
+    if (key && known.has(key)) {
+      duplicates += 1
+      continue
+    }
+    if (key) known.add(key)
     const draft = {
       id: `d${randomId(9)}`,
       batchId,
@@ -1374,9 +1597,39 @@ async function createDraftsFromUrl(env, rawUrl) {
     drafts.push(draft)
   }
   await trimDrafts(env)
-  await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(drafts.map((draft) => draft.id)))
+  if (drafts.length) {
+    await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(drafts.map((draft) => draft.id)))
+  }
 
-  return { drafts, site: parsed.site, pageTitle: parsed.pageTitle }
+  return { drafts, duplicates, site: parsed.site, pageTitle: parsed.pageTitle }
+}
+
+/** Source URLs of everything already on the site or waiting as a draft. */
+async function collectSourceUrls(env) {
+  const sources = new Set()
+  try {
+    const ids = await readIndex(env)
+    const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+    for (const record of records) {
+      const key = normaliseSourceUrl(record?.sourceUrl)
+      if (key) sources.add(key)
+    }
+  } catch {
+    /* dedupe is best effort — a KV hiccup must not block scraping */
+  }
+  try {
+    for (const draft of await listDrafts(env)) {
+      const key = normaliseSourceUrl(draft.sourceUrl)
+      if (key) sources.add(key)
+    }
+  } catch {
+    /* ditto */
+  }
+  return sources
+}
+
+function normaliseSourceUrl(url) {
+  return String(url || '').trim().replace(/\/+$/, '')
 }
 
 /** Bot wrapper around createDraftsFromUrl: sends the review cards. */
@@ -1387,14 +1640,19 @@ async function scrapeIntoDrafts(env, chatId, rawUrl) {
   if (result.error) return send(env, chatId, `⚠️ ${result.error}`)
 
   const { drafts } = result
+  if (!drafts.length && result.duplicates) {
+    return send(env, chatId,
+      `↩️ All ${result.duplicates} video${result.duplicates === 1 ? '' : 's'} on that page are already on the site or in drafts — nothing new to review.`)
+  }
   if (drafts.length === 1) return sendDraftCard(env, chatId, drafts[0])
 
   const lines = drafts.slice(0, 15).map(
     (draft, index) => `${index + 1}. ${previewTitleFor(draft)}\n    ${draft.category || DEFAULT_CATEGORY}`,
   )
   const more = drafts.length > 15 ? `\n…and ${drafts.length - 15} more.` : ''
+  const skipped = result.duplicates ? ` · skipped ${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'}` : ''
   return sendWithKeyboard(env, chatId,
-    `🔎 Found ${drafts.length} videos on ${result.site || 'that page'}.\n\n` +
+    `🔎 Found ${drafts.length} videos on ${result.site || 'that page'}${skipped}.\n\n` +
     `${lines.join('\n')}${more}\n\n` +
     'Nothing is published yet. Publish them all, or review one by one.',
     [
@@ -1881,6 +2139,7 @@ async function removeVideo(env, id) {
   const existing = await readVideo(env, id)
   if (!existing) return false
   await env.VIDEOS.delete(`v:${id}`)
+  await env.VIDEOS.delete(`views:${id}`)
   const ids = (await readIndex(env)).filter((x) => x !== id)
   await env.VIDEOS.put('idx', JSON.stringify(ids))
   return true

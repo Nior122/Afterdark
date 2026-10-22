@@ -3,7 +3,9 @@
  * Runs the *built* bundle in jsdom, the way a browser does.
  *
  *   npm i --no-save jsdom        # once; deliberately not a dependency
- *   npm run verify:bundle        # after `npm run build`
+ *   VITE_TELEGRAM_FEED_URL=https://worker.test npm run build   # the scenarios
+ *     expect a Worker origin to point at, so the bundle must be built with it
+ *   npm run verify:bundle        # after that build
  *
  * Why this exists: `verify` inspects static HTML and `verify:render` renders
  * components in isolation, so both missed a crash where the age gate rendered
@@ -14,7 +16,10 @@
  *
  * Scenarios covered: first visit, returning visitor, direct mode, an
  * unreachable Worker, a Worker that never answers, a video page and the
- * dashboard.
+ * dashboard; the ads pipeline (global toggle, per-slot switch, preview
+ * outlines); the view counter POST (/api/videos/:id/view with a browser
+ * session id); and the dashboard's admin list with views, total and the
+ * bulk-management controls.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -39,17 +44,26 @@ const urlFor = (path) => `${origin}${basePath}${path.replace(/^\/+/, '')}`
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** Every Worker request the bundle makes, so scenarios can assert on it. */
+const apiCalls = []
+
 /** Only the Worker is simulated; asset/module requests must resolve normally. */
 const onlyWorker = (behaviour) => (input, init) => {
   const url = String(input)
   if (!url.includes('workers.dev') && !url.includes('/api/')) {
     return Promise.resolve(new Response('/* stub */', { status: 200, headers: { 'Content-Type': 'text/javascript' } }))
   }
+  apiCalls.push({
+    url,
+    method: String(init?.method || 'GET').toUpperCase(),
+    body: typeof init?.body === 'string' ? init.body : '',
+  })
   return behaviour(url, init)
 }
 
 const adsFixture = {
   enabled: true,
+  preview: false,
   header: '<div id="ad-header-probe">HEADER AD</div>',
   native: '<div id="ad-native-probe">NATIVE AD</div>',
   sidebar: '',
@@ -58,7 +72,7 @@ const adsFixture = {
   popunder: '<script>window.__popunderProbe = true</script>',
 }
 
-const adsFixture_ = { enabled: false, header: '', native: '', sidebar: '', footer: '', video: '', popunder: '' }
+const adsFixture_ = { ...adsFixture, enabled: false, header: '', native: '', sidebar: '', footer: '', video: '', popunder: '' }
 
 const okWorker = (mode, extra = {}) => onlyWorker((url) => {
   if (url.endsWith('/api/settings')) {
@@ -66,6 +80,39 @@ const okWorker = (mode, extra = {}) => onlyWorker((url) => {
   }
   if (url.endsWith('/api/videos')) return Promise.resolve(new Response(JSON.stringify({ videos: [] }), { status: 200 }))
   if (url.includes('/api/admin/')) return Promise.resolve(new Response(JSON.stringify({ mode, modes: ['public', 'direct'], videos: [], drafts: [] }), { status: 200 }))
+  return Promise.resolve(new Response('{}', { status: 200 }))
+})
+
+/**
+ * Worker double for the signed-in dashboard: answers the admin endpoints the
+ * Videos tab drives, with view counts so the total/sort UI can be asserted.
+ */
+const dashboardWorker = (mode) => onlyWorker((url, init) => {
+  if (init?.method === 'POST' && /\/api\/admin\/videos\/bulk-(delete|patch)$/.test(url)) {
+    return Promise.resolve(new Response(JSON.stringify({ ok: true, deleted: [], missing: [], updated: [] }), { status: 200 }))
+  }
+  if (url.endsWith('/api/admin/settings')) {
+    return Promise.resolve(new Response(JSON.stringify({
+      mode, modes: ['public', 'direct'], redirectUrl: '', ads: { ...adsFixture_ },
+      slots: ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'],
+      updatedAt: null, adsUpdatedAt: null, github: false, feedUrl: origin,
+    }), { status: 200 }))
+  }
+  if (url.endsWith('/api/admin/videos')) {
+    return Promise.resolve(new Response(JSON.stringify({
+      videos: [{
+        id: 'w-viewfixture', title: 'Views Fixture Video', category: 'POV', tags: ['POV'],
+        durationSec: 120, kind: 'link', tooLarge: false, views: 1234,
+        sourceUrl: 'https://source.test/video/1', thumbUrl: 'https://source.test/t.jpg',
+        streamUrl: null, description: '', site: 'source.test', createdAt: Date.now(), updatedAt: null,
+      }],
+      total: 1,
+      viewsTotal: 1234,
+    }), { status: 200 }))
+  }
+  if (url.endsWith('/api/admin/drafts')) return Promise.resolve(new Response(JSON.stringify({ drafts: [] }), { status: 200 }))
+  if (url.endsWith('/api/settings')) return Promise.resolve(new Response(JSON.stringify({ mode, redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+  if (url.endsWith('/api/videos')) return Promise.resolve(new Response(JSON.stringify({ videos: [] }), { status: 200 }))
   return Promise.resolve(new Response('{}', { status: 200 }))
 })
 
@@ -111,6 +158,22 @@ const scenarios = [
     noAnchors: true,
   },
   {
+    name: 'video page reports a view to the Worker (per-session dedupe is server-side)',
+    path: '/v/v-pov-kat-mar10/',
+    fetch: okWorker('public'),
+    accepted: true,
+    noAnchors: true,
+    expect: (text) => /Kat Mar10/i.test(text),
+    probe: (calls) => [
+      ['POST /api/videos/:id/view fired', calls.some(
+        (call) => call.method === 'POST' && /\/api\/videos\/v-pov-kat-mar10\/view$/.test(call.url),
+      )],
+      ['view POST carries a browser session id', calls.some(
+        (call) => call.method === 'POST' && /\/view$/.test(call.url) && /"session":"s-/.test(call.body),
+      )],
+    ],
+  },
+  {
     name: 'dashboard shows sign-in, never age-gated',
     path: '/admin/',
     fetch: okWorker('public'),
@@ -121,6 +184,25 @@ const scenarios = [
     path: '/admin/',
     fetch: okWorker('direct'),
     expect: (text) => /Owner sign-in|ADMIN_TOKEN/i.test(text),
+  },
+  {
+    name: 'signed-in dashboard lists views, the total and bulk controls',
+    path: '/admin/',
+    fetch: dashboardWorker('public'),
+    accepted: true,
+    session: { 'afterdark.admin.v1': 'probe-admin-token' },
+    expect: (text) =>
+      /Views Fixture Video/.test(text) &&
+      /1,234 views total/.test(text) &&
+      /Most views/.test(text),
+    probes: (window) => [
+      ['sort select present', Boolean(window.document.querySelector('select[aria-label="Sort videos"]'))],
+      ['category filter present', Boolean(window.document.querySelector('select[aria-label="Filter by category"]'))],
+      ['search field present', Boolean(window.document.querySelector('input[aria-label="Search videos"]'))],
+      ['select-all checkbox present', Boolean(window.document.querySelector('input[type="checkbox"][aria-label="Select all shown videos"]'))],
+      ['per-row copy-link action', Boolean(window.document.querySelector('button[aria-label="Copy link to this video page"]'))],
+      ['per-row open-page action', Boolean(window.document.querySelector('a[target="_blank"][href$="/v/w-viewfixture/"]'))],
+    ],
   },
   {
     name: 'ad slots render the owner code',
@@ -143,6 +225,31 @@ const scenarios = [
     probes: (window) => [['no ad containers at all', window.document.querySelectorAll('[data-ad-slot]').length === 0]],
   },
   {
+    name: 'per-slot switch hides just that slot',
+    path: '/',
+    fetch: okWorker('public', { ads: { ...adsFixture, slotsOn: { header: false, native: true } } }),
+    accepted: true,
+    expect: (text) => !/HEADER AD/.test(text) && /NATIVE AD/.test(text),
+    probes: (window) => [
+      ['disabled header not rendered', !window.document.querySelector('[data-ad-slot="header"]')],
+      ['enabled native still renders', Boolean(window.document.querySelector('[data-ad-slot="native"] #ad-native-probe'))],
+    ],
+  },
+  {
+    name: 'preview mode outlines every slot and runs no ad code',
+    path: '/',
+    fetch: okWorker('public', { ads: { ...adsFixture, preview: true } }),
+    accepted: true,
+    expect: (text) => !/HEADER AD/.test(text) && !/NATIVE AD/.test(text) && /Ad slot/i.test(text),
+    probes: (window) => [
+      ['header outlined', Boolean(window.document.querySelector('[data-ad-preview="header"]'))],
+      ['native outlined', Boolean(window.document.querySelector('[data-ad-preview="native"]'))],
+      ['empty sidebar outlined too', Boolean(window.document.querySelector('[data-ad-preview="sidebar"]'))],
+      ['no live ad containers while previewing', window.document.querySelectorAll('[data-ad-slot]').length === 0],
+      ['popunder script not injected', !window.__popunderProbe],
+    ],
+  },
+  {
     name: 'video page shows its own ad slot',
     path: '/v/v-pov-kat-mar10/',
     fetch: okWorker('direct', { ads: adsFixture }),
@@ -150,6 +257,16 @@ const scenarios = [
     expect: (text) => /VIDEO AD/.test(text),
     probes: (window) => [
       ['video slot injected', Boolean(window.document.querySelector('[data-ad-slot="video"] #ad-video-probe'))],
+    ],
+  },
+  {
+    name: 'video page in direct mode outlines its slot while previewing',
+    path: '/v/v-pov-kat-mar10/',
+    fetch: okWorker('direct', { ads: { ...adsFixture, preview: true, video: '' } }),
+    accepted: true,
+    expect: (text) => /Kat Mar10/.test(text) && /Ad slot/i.test(text),
+    probes: (window) => [
+      ['video slot outlined', Boolean(window.document.querySelector('[data-ad-preview="video"]'))],
     ],
   },
 ]
@@ -162,6 +279,7 @@ for (const [index, scenario] of scenarios.entries()) {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
   window.scrollTo = () => {}
   if (scenario.accepted) window.localStorage.setItem('afterdark.age.v1', 'yes')
+  for (const [key, value] of Object.entries(scenario.session || {})) window.sessionStorage.setItem(key, value)
 
   const errors = []
   window.addEventListener('error', (event) => errors.push(String(event.message)))
@@ -183,6 +301,7 @@ for (const [index, scenario] of scenarios.entries()) {
   global.fetch = scenario.fetch
   global.IS_REACT_ACT_ENVIRONMENT = false
 
+  const callsBefore = apiCalls.length
   try {
     await import(`${pathToFileURL(join(assetDir, bundleName)).href}?scenario=${index}`)
     await wait(1800)
@@ -196,6 +315,11 @@ for (const [index, scenario] of scenarios.entries()) {
     if (text && !scenario.expect(text)) problems.push(`unexpected content: ${text.slice(0, 120)}`)
     if (scenario.noAnchors && anchors > 0) problems.push(`${anchors} anchor(s) on a standalone video page`)
     for (const [label, ok] of scenario.probes?.(window) ?? []) {
+      if (!ok) problems.push(label)
+    }
+    // API-call assertions run after the probes; the scenario only sees the
+    // requests it caused itself.
+    for (const [label, ok] of scenario.probe?.(apiCalls.slice(callsBefore)) ?? []) {
       if (!ok) problems.push(label)
     }
     if (errors.length) problems.push(`errors: ${errors.slice(0, 2).join(' | ')}`)

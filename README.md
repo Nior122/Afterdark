@@ -94,6 +94,13 @@ never shift the layout, and with ads off (the default) nothing at all is rendere
 stays ad-free so you always have a page that loads without third-party scripts. Ads are limited
 to 20 KB per slot and shown on video pages in both modes.
 
+Two switches stack: the global one plus a **per-slot enable** — a slot renders only when both are
+on and it holds code (hide one network without touching the others; toggling is instant, like the
+global switch). **Slot preview outlines** replaces live ads on the whole site with dashed boxes
+labelled per slot (`on` / `off` / `empty`) so you can check placement while deciding — no ad code
+executes while previewing. Both settings live in the same KV blob as the code and reach the site
+through `/api/settings`, so nothing needs a rebuild.
+
 > Ads are third-party code on your pages: only paste tags from networks you trust, and check what
 > they do to load time. Adult traffic is rejected by most mainstream networks, so test the offer
 > link from the same country as your visitors.
@@ -125,30 +132,64 @@ which the dashboard's **Rebuild site** button triggers.
 Forward a video to a Telegram bot and it appears on the site for everyone — including videos
 from private chats/channels that the public embed cannot reach. A tiny Cloudflare Worker
 (`worker/worker.js`) receives the bot's updates, stores only Telegram file IDs in KV, publishes
-a JSON feed at `/api/videos`, and proxies playback/thumbnails so the bot token never reaches
-the browser. The site merges that feed into the catalogue when the build-time variable
-`VITE_TELEGRAM_FEED_URL` is set (GitHub repo variable for Pages deploys, or `.env.local` —
-see `.env.example`); unset, the site is unchanged. One-time setup (~10 minutes, all free) is
-documented step-by-step in [docs/telegram-bot-setup.md](docs/telegram-bot-setup.md).
+a JSON feed at `/api/videos` (each video carries its real `views` count), and proxies
+playback/thumbnails so the bot token never reaches the browser. The site merges that feed into
+the catalogue when the build-time variable `VITE_TELEGRAM_FEED_URL` is set (GitHub repo variable
+for Pages deploys, or `.env.local` — see `.env.example`); unset, the site is unchanged. One-time
+setup (~10 minutes, all free) is documented step-by-step in
+[docs/telegram-bot-setup.md](docs/telegram-bot-setup.md).
 
 What the bot does:
 
 | Feature | How |
 | --- | --- |
 | Publish a forwarded video | Caption line 1 = title, `#Hashtags` = tags/category; published immediately |
-| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24) |
+| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
 | Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
 | **Switch site mode** | `/mode` — public catalogue ⇄ direct links only, applied live |
-| **Admin dashboard** | `/admin/` does the same jobs in a web page: mode switch, home-page redirect, ad slots, rename, recategorise, delete, scrape, review/publish drafts, rebuild the site. Works in **both** modes |
+| **Admin dashboard** | `/admin/` does the same jobs in a web page, and more: mode switch, home-page redirect, ad slots (per-slot enable + preview outlines), search/filter/sort, bulk delete/recategorise, bulk link scraping, review/publish drafts, rebuild the site. Works in **both** modes |
+
+### View counting
+
+Every video page — `/v/<id>/` (both modes) and the catalogue's `/watch/:id` — fires
+`POST /api/videos/:id/view` once per load against the Worker. The browser generates a random
+session id (sessionStorage, nothing identifying), and the Worker dedupes per video per session
+with a 24 h KV marker, so reloads do not inflate the number. The counter lives at `views:<id>` in
+KV, ships in the public feed as `views`, and the site shows its derived placeholder until a video
+has its first real view. The dashboard's Videos tab lists per-video views, sorts by
+views/newest/title and totals them (`/api/admin/videos` → `viewsTotal`); deleting a video (one or
+many) clears its counter.
 
 Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
 and the site plays them through its usual shielded player. Telegram bots can only fetch files
 up to 20 MB, so larger files still go through public `t.me` links or a scraped embed URL.
 Note that some sites block server-side requests (403 / JavaScript challenge); the bot reports
 that and suggests pasting the direct embed link instead.
+
+### Advanced management (dashboard)
+
+Everything below lives in the `/admin/` dashboard and the Worker's KV — runtime settings, never
+baked into the build, so none of it needs a rebuild:
+
+- **Bulk link scraping** — the *Add from link* tab takes a multi-line list (up to 20 URLs, or a
+  single gallery URL) and scrapes them one after another through the same `/api/admin/scrape`
+  endpoint the bot uses. Each URL gets its own status as the run goes: `queued → scraping →`
+  `scraped · N` / `blocked` (page refused us) / `duplicate` (its source is already published or
+  drafted — the Worker reports the count). When the run finishes: **Publish all**, **Review each**
+  (jumps to Drafts) or **Discard batch** (only the drafts this run created).
+- **Bulk video management** — the *Videos* tab has search, a category filter and sorting
+  (most views / newest / title A–Z), pagination, and checkbox selection with a bulk bar: delete
+  many at once or recategorise the selection (`POST /api/admin/videos/bulk-delete` and
+  `…/videos/bulk-patch`, one call per 200 ids). Every row shows the thumbnail, real view count,
+  added date, per-row category/rename/delete, plus **copy link** (canonical `/v/<id>/` URL) and
+  **open page**.
+- **Ads, per slot** — each slot has its own enable next to the global toggle, and a preview mode
+  outlines every slot on the live site without running third-party code (see [Ads](#ads)).
+- **Views** — per-video counters in KV surfaced in the feed, the admin API and the Videos tab,
+  with a total (see [View counting](#view-counting)).
 
 ## Screens
 
@@ -297,7 +338,7 @@ is dark and `<div id="root">` is empty. Check, in this order:
 | `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
-| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page, dashboard, ad injection |
+| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in and the signed-in videos table with views), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
 | `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, failure modes |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 

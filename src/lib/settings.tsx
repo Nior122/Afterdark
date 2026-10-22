@@ -28,7 +28,12 @@ export const AD_SLOT_NAMES = ['header', 'native', 'sidebar', 'footer', 'video', 
 export type AdSlotName = (typeof AD_SLOT_NAMES)[number]
 
 export interface AdConfig {
+  /** Global switch — nothing renders while this is off. */
   enabled: boolean
+  /** Per-slot switch: a slot shows only when `enabled` and its own flag are on. */
+  slotsOn: Record<AdSlotName, boolean>
+  /** Outline mode: sites draw dashed boxes where slots sit, running no ad code. */
+  preview: boolean
   header: string
   native: string
   sidebar: string
@@ -39,6 +44,8 @@ export interface AdConfig {
 
 export const EMPTY_ADS: AdConfig = {
   enabled: false,
+  slotsOn: { header: true, native: true, sidebar: true, footer: true, video: true, popunder: true },
+  preview: false,
   header: '',
   native: '',
   sidebar: '',
@@ -72,13 +79,18 @@ function cachedMode(): SiteMode | null {
 }
 
 function normaliseAds(value: unknown): AdConfig {
-  const ads: AdConfig = { ...EMPTY_ADS }
+  // Copy the per-slot defaults too: EMPTY_ADS.slotsOn is shared otherwise.
+  const ads: AdConfig = { ...EMPTY_ADS, slotsOn: { ...EMPTY_ADS.slotsOn } }
   if (!value || typeof value !== 'object') return ads
   const record = value as Record<string, unknown>
   ads.enabled = Boolean(record.enabled)
+  ads.preview = Boolean(record.preview)
+  const slotsOn = (record.slotsOn && typeof record.slotsOn === 'object' ? record.slotsOn : {}) as Record<string, unknown>
   for (const slot of AD_SLOT_NAMES) {
     const text = record[slot]
     ads[slot] = typeof text === 'string' ? text : ''
+    // Workers from before per-slot toggles default every slot to on.
+    ads.slotsOn[slot] = typeof slotsOn[slot] === 'boolean' ? slotsOn[slot] : true
   }
   return ads
 }

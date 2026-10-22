@@ -2,7 +2,7 @@ import { CATEGORIES, type Video } from '../data/seed'
 import { asset } from './asset'
 import { channelForVideo } from './uploader'
 import { deriveViews } from './stats'
-import { timeAgo } from './video'
+import { formatViews, timeAgo } from './video'
 
 /**
  * Optional Telegram bot feed.
@@ -32,6 +32,8 @@ interface FeedVideo {
   thumbUrl?: string | null
   description?: string
   site?: string
+  /** Real view count from the Worker (0 until the first view is reported). */
+  views?: number
 }
 
 const FEED_BASE = (import.meta.env.VITE_TELEGRAM_FEED_URL as string | undefined)?.replace(
@@ -67,12 +69,15 @@ export function mapFeedVideo(v: FeedVideo): Video {
   const description =
     v.description?.trim() ||
     `${category} · ${duration}.${v.site ? ` Source: ${v.site}.` : ''}`
+  // Real counted views once the video has any; until then the derived
+  // placeholder keeps a just-published video from showing "0 views".
+  const counted = typeof v.views === 'number' && v.views > 0 ? v.views : null
   return {
     id: v.id,
     title: v.title?.trim() || 'Telegram video',
     thumbnail: v.thumbUrl || asset('/thumbnails/placeholder.svg'),
     duration,
-    views: deriveViews(v.id, v.createdAt),
+    views: counted !== null ? formatViews(counted) : deriveViews(v.id, v.createdAt),
     publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
     channelId: '',
     category,
