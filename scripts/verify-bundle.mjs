@@ -186,6 +186,23 @@ const scenarios = [
     expect: (text) => /Owner sign-in|ADMIN_TOKEN/i.test(text),
   },
   {
+    name: 'a stalled Worker turns sign-in into a message, not a permanent spinner',
+    path: '/admin/',
+    session: { 'afterdark.admin.v1': 'probe-admin-token' },
+    fetch: (() => {
+      const base = dashboardWorker('public')
+      return onlyWorker((url, init) => {
+        // signIn() probes GET /api/admin/settings; reject the way the browser
+        // rejects a fetch whose AbortSignal.timeout fires.
+        if (url.endsWith('/api/admin/settings')) {
+          return Promise.reject(Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }))
+        }
+        return base(url, init)
+      })
+    })(),
+    expect: (text) => /did not answer within/i.test(text) && !/Checking…/.test(text),
+  },
+  {
     name: 'signed-in dashboard lists views, the total and bulk controls',
     path: '/admin/',
     fetch: dashboardWorker('public'),

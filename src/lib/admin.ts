@@ -87,7 +87,28 @@ export function adminConfigured(): boolean {
   return Boolean(FEED_ORIGIN)
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Every dashboard call has a deadline. A Worker whose origin accepts the
+ * connection but never answers (a sleeping host, a wrong URL that still
+ * resolves) would otherwise leave the sign-in button stuck on "Checking…"
+ * and every panel on a spinner — the page looks dead even though it loaded
+ * fine. With a timer the UI says what failed and what to check instead.
+ */
+const REQUEST_TIMEOUT_MS = 15_000
+/** Scrapes fetch a remote page inside the Worker, which may take its time. */
+const SCRAPE_TIMEOUT_MS = 30_000
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  const owner = typeof AbortSignal === 'undefined' ? undefined : (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal })
+  if (!owner || typeof owner.timeout !== 'function') return undefined
+  try {
+    return owner.timeout(ms)
+  } catch {
+    return undefined
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   if (!FEED_ORIGIN) {
     throw new AdminError(
       'This site has no bot Worker configured, so there is no dashboard data. ' +
@@ -95,15 +116,34 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       0,
     )
   }
-  const response = await fetch(`${FEED_ORIGIN}/api/admin/${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getToken()}`,
-      ...(init.headers || {}),
-    },
-    cache: 'no-store',
-  })
+  let response: Response
+  try {
+    response = await fetch(`${FEED_ORIGIN}/api/admin/${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken()}`,
+        ...(init.headers || {}),
+      },
+      cache: 'no-store',
+      signal: timeoutSignal(timeoutMs),
+    })
+  } catch (cause) {
+    const name = (cause as { name?: string } | null)?.name ?? ''
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new AdminError(
+        `The Worker at ${FEED_ORIGIN} did not answer within ${Math.round(timeoutMs / 1000)} s. ` +
+          'Check that the Worker is deployed (GET /health should answer) and that this build was made ' +
+          'with VITE_TELEGRAM_FEED_URL pointing at it.',
+        0,
+      )
+    }
+    throw new AdminError(
+      'Could not reach the bot Worker — the request failed before the Worker answered. ' +
+        'Check that it is deployed and that VITE_TELEGRAM_FEED_URL matches.',
+      0,
+    )
+  }
   let body: unknown = null
   try {
     body = await response.json()
@@ -208,7 +248,7 @@ export const admin = {
     }>('scrape', {
       method: 'POST',
       body: JSON.stringify({ url }),
-    }),
+    }, SCRAPE_TIMEOUT_MS),
   /** Discard the given drafts — or every pending draft when ids are omitted. */
   discardDrafts: (ids?: string[]) =>
     request<{ ok: true; discarded: string[] }>('drafts/discard-all', {

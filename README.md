@@ -190,6 +190,11 @@ baked into the build, so none of it needs a rebuild:
   outlines every slot on the live site without running third-party code (see [Ads](#ads)).
 - **Views** — per-video counters in KV surfaced in the feed, the admin API and the Videos tab,
   with a total (see [View counting](#view-counting)).
+- **No infinite spinners** — every dashboard call to the Worker runs under a deadline (15 s, 30 s
+  for scrapes) and page-level settings reads are cut off after 2 s, so a Worker that accepts the
+  connection but never answers produces a one-line actionable error instead of a page stuck on
+  "Checking…". The message names what to check: the Worker's `/health` and the Pages build
+  variable `VITE_TELEGRAM_FEED_URL`.
 
 ## Screens
 
@@ -338,8 +343,8 @@ is dark and `<div id="root">` is empty. Check, in this order:
 | `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
-| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in and the signed-in videos table with views), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
-| `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, failure modes |
+| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in, a stalled Worker surfacing the timeout message instead of "Checking…", and the signed-in videos table with views), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
+| `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, failure modes, and that a hung Worker is cut off instead of hanging the navigation |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 
 ## Deployment
