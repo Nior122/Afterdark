@@ -48,6 +48,11 @@ category and optional duration (`8:31` or seconds). Everything is stored in the 
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are
 tagged **Yours** and can be deleted from their card menu or the watch page.
 
+**Setting this up for the first time?** Follow
+[docs/cloudflare-setup-walkthrough.md](docs/cloudflare-setup-walkthrough.md) —
+the same steps as the bot guide, but slower, with checkpoints and a
+troubleshooting table.
+
 ## Two site modes (one switch)
 
 The site ships with a runtime switch, stored in the Worker's KV so it needs no rebuild:
