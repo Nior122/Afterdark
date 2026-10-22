@@ -34,13 +34,16 @@ let mode = 'public'
 const requests = []
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-function setupDom(pathname) {
+function setupDom(pathname, accepted = true) {
   const dom = new JSDOM(
     '<!doctype html><html><head><base href="/"></head><body><div id="root"></div></body></html>',
     { url: `https://afterdark.test${pathname}`, pretendToBeVisual: true },
   )
   const { window } = dom
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
+  // The age gate now lives inside the router, so it is part of every page.
+  // Default the harness to a returning visitor; one scenario tests the gate.
+  if (accepted) window.localStorage.setItem('afterdark.age.v1', 'yes')
   window.scrollTo = () => {}
   window.HTMLElement.prototype.scrollIntoView = () => {}
   for (const key of [
@@ -73,9 +76,9 @@ function mockFetch() {
   }
 }
 
-function mountApp(pathname, currentMode) {
+function mountApp(pathname, currentMode, accepted = true) {
   mode = currentMode
-  const dom = setupDom(pathname)
+  const dom = setupDom(pathname, accepted)
   mockFetch()
   delete require.cache[require.resolve(bundle)]
   require(bundle).mount(dom.window.document.getElementById('root'))
@@ -100,6 +103,11 @@ async function run() {
   check('direct mode: neutral message', /isn’t available|not available/i.test(text), text.slice(0, 160))
   check('direct mode: no links', dom.window.document.querySelectorAll('a').length === 0)
   check('direct mode: no video ids', !dom.window.document.body.innerHTML.includes('v-pov-tatum-christine'))
+
+  dom = mountApp('/', 'public', false)
+  await wait(700)
+  text = dom.window.document.body.textContent
+  check('first visit: age gate renders (no blank page)', /18\+ only/i.test(text), text.slice(0, 120))
 
   dom = mountApp('/', 'public')
   await wait(700)

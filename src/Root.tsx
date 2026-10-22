@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
 import App from './App'
+import AgeGate from './components/AgeGate'
+import ErrorBoundary from './components/ErrorBoundary'
 import DirectVideoPage from './pages/DirectVideoPage'
 import NotFoundPage from './pages/NotFoundPage'
 import AdminPage from './pages/AdminPage'
@@ -13,6 +16,10 @@ import { useSiteSettings } from './lib/settings'
  *   /admin/    own prerendered file → path router → owner dashboard
  *   anything else → the catalogue's hash routes, or the neutral 404 when the
  *                   owner has switched the site to direct-link mode
+ *
+ * Important: everything that can render a <Link> must live *inside* a router.
+ * The age gate is therefore mounted inside each branch, not above this
+ * component (it renders the wordmark, which links home).
  */
 type RouteKind = 'video' | 'admin' | 'site'
 
@@ -30,15 +37,25 @@ function basename(): string {
   return base || '/'
 }
 
+/** How long the catalogue may wait for the mode before assuming "public". */
+const MODE_WAIT_MS = 1500
+
 /** The catalogue, gated by the site mode. */
 function CatalogueRoot() {
   const { mode } = useSiteSettings()
+  const [waited, setWaited] = useState(false)
 
-  // Wait for the mode before painting: in direct mode the catalogue must never
-  // flash a home feed full of links.
-  if (mode === null) return <div className="min-h-screen bg-surface" aria-busy="true" />
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWaited(true), MODE_WAIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  // Direct mode must never flash a feed full of links, so a known 'direct'
+  // wins immediately. While the mode is unknown we wait — but only briefly:
+  // an unreachable Worker must not leave a permanently empty page.
   if (mode === 'direct') return <NotFoundPage />
-  return <App />
+  if (mode === null && !waited) return <div className="min-h-screen bg-surface" aria-busy="true" />
+  return <AgeGate><App /></AgeGate>
 }
 
 export default function Root() {
@@ -46,29 +63,37 @@ export default function Root() {
 
   if (kind === 'video') {
     return (
-      <BrowserRouter basename={basename()}>
-        <Routes>
-          <Route path="/v/:id" element={<DirectVideoPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </BrowserRouter>
+      <ErrorBoundary>
+        <BrowserRouter basename={basename()}>
+          <Routes>
+            <Route path="/v/:id" element={<AgeGate><DirectVideoPage /></AgeGate>} />
+            <Route path="*" element={<AgeGate><NotFoundPage /></AgeGate>} />
+          </Routes>
+        </BrowserRouter>
+      </ErrorBoundary>
     )
   }
 
   if (kind === 'admin') {
+    // The dashboard is owner-only and has nothing adult in it, so it is not
+    // age-gated — an owner can always manage the site.
     return (
-      <BrowserRouter basename={basename()}>
-        <Routes>
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </BrowserRouter>
+      <ErrorBoundary>
+        <BrowserRouter basename={basename()}>
+          <Routes>
+            <Route path="/admin" element={<AdminPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </BrowserRouter>
+      </ErrorBoundary>
     )
   }
 
   return (
-    <HashRouter>
-      <CatalogueRoot />
-    </HashRouter>
+    <ErrorBoundary>
+      <HashRouter>
+        <CatalogueRoot />
+      </HashRouter>
+    </ErrorBoundary>
   )
 }
