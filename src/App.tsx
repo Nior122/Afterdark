@@ -1,66 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Route, Routes, useLocation } from 'react-router-dom'
-import Header from './components/Header'
-import Sidebar from './components/Sidebar'
-import CreateModal from './components/CreateModal'
-import HomePage from './pages/HomePage'
-import BrowsePage from './pages/BrowsePage'
-import ChannelPage from './pages/ChannelPage'
-import ExplorePage from './pages/ExplorePage'
-import TrendingPage from './pages/TrendingPage'
-import SubscriptionsPage from './pages/SubscriptionsPage'
-import LibraryPage from './pages/LibraryPage'
-import HistoryPage from './pages/HistoryPage'
-import WatchLaterPage from './pages/WatchLaterPage'
-import LikedPage from './pages/LikedPage'
-import ResultsPage from './pages/ResultsPage'
-import WatchPage from './pages/WatchPage'
+import { Route, Routes } from 'react-router-dom'
+import VideoPage from './pages/VideoPage'
 import NotFoundPage from './pages/NotFoundPage'
 
-function ScrollToTop() {
-  const { pathname, search } = useLocation()
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
-  }, [pathname, search])
-  return null
-}
-
+/**
+ * Two routes only:
+ *
+ *   /v/:id  a single video page (player, title, optional description)
+ *   *       neutral 404 — including "/", which lists nothing
+ *
+ * There is no home feed, category, search, channel or related-video route.
+ */
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
-  const location = useLocation()
-
-  useEffect(() => {
-    setSidebarOpen(false)
-  }, [location.pathname])
-
   return (
     <div className="min-h-screen bg-surface">
-      <ScrollToTop />
-      <Header onToggleSidebar={() => setSidebarOpen((open) => !open)} />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-
-      <div className="pt-16 lg:pl-[192px]">
-        <main className="px-4 pb-20 sm:px-5 xl:px-6">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/browse/:category" element={<BrowsePage />} />
-            <Route path="/channel/:channelId" element={<ChannelPage />} />
-            <Route path="/explore" element={<ExplorePage />} />
-            <Route path="/trending" element={<TrendingPage />} />
-            <Route path="/subscriptions" element={<SubscriptionsPage />} />
-            <Route path="/library" element={<LibraryPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/watch-later" element={<WatchLaterPage />} />
-            <Route path="/liked" element={<LikedPage />} />
-            <Route path="/results" element={<ResultsPage />} />
-            <Route path="/watch/:id" element={<WatchPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </main>
-      </div>
-
-      <CreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <Routes>
+        <Route path="/v/:id" element={<VideoPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
     </div>
   )
 }

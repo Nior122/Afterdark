@@ -1,19 +1,19 @@
-import { CATEGORIES, type Video } from '../data/seed'
-import { asset } from './asset'
-import { channelForVideo } from './uploader'
-import { deriveViews } from './stats'
-import { timeAgo } from './video'
+import { PLACEHOLDER_THUMBNAIL, type Video } from '../data/seed'
 
 /**
  * Optional Telegram bot feed.
  *
  * When `VITE_TELEGRAM_FEED_URL` points at the bot Worker (worker/worker.js,
  * see docs/telegram-bot-setup.md), videos the owner forwards to the bot are
- * fetched from its public `/api/videos` feed and merged into the catalogue.
- * Playback streams through the Worker's proxy (`.../stream.mp4`, which the
- * URL resolver treats as a native file), so the bot token and raw Telegram
- * file links never reach the browser. With the variable unset (default),
- * this resolves to an empty list and the site behaves exactly as before.
+ * fetched from its public `/api/videos` feed. Playback streams through the
+ * Worker's proxy (`…/stream.mp4`, which the URL resolver treats as a native
+ * file), so the bot token and raw Telegram file links never reach the browser.
+ * With the variable unset (default) this resolves to an empty list.
+ *
+ * Feed videos are playable by direct link straight away. To have them
+ * prerendered and listed in sitemap.xml they must be present at build time —
+ * the build fetches the same feed (scripts/prerender.mjs) when this variable
+ * is set, so a normal redeploy indexes them.
  */
 
 interface FeedVideo {
@@ -42,30 +42,25 @@ function formatDurationSec(totalSec?: number): string {
     : `${m}:${String(sec).padStart(2, '0')}`
 }
 
-function mapFeedVideo(v: FeedVideo): Video {
-  const declaredCategory =
-    v.category && v.category !== 'All' && (CATEGORIES as readonly string[]).includes(v.category)
-      ? v.category
-      : undefined
-  const duration = formatDurationSec(v.durationSec)
-  // When the bot did not tag a category, inherit the assigned channel's niche
-  // so the listing lands in the right browse row. channelForVideo is a pure
-  // hash of the id, so this is stable across reloads.
-  const category =
-    declaredCategory ??
-    channelForVideo({ id: v.id, channelId: '', category: '' }).category
+function isoDate(timestamp?: number): string {
+  const date = new Date(timestamp || Date.now())
+  return Number.isNaN(date.getTime()) ? new Date().toISOString().slice(0, 10) : date.toISOString().slice(0, 10)
+}
+
+function mapFeedVideo(video: FeedVideo): Video {
+  const duration = formatDurationSec(video.durationSec)
+  const category = video.category && video.category !== 'All' ? video.category : 'Homemade'
   return {
-    id: v.id,
-    title: v.title?.trim() || 'Telegram video',
-    thumbnail: v.thumbUrl || asset('/thumbnails/placeholder.svg'),
+    id: video.id,
+    title: video.title?.trim() || 'Telegram video',
+    thumbnail: video.thumbUrl || PLACEHOLDER_THUMBNAIL,
     duration,
-    views: deriveViews(v.id, v.createdAt),
-    publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
-    channelId: '',
+    views: '',
+    addedAt: isoDate(video.createdAt),
     category,
-    videoUrl: v.streamUrl,
-    description: `${category} · ${duration}.`,
-    tags: v.tags?.length ? v.tags : [category, 'Telegram'],
+    videoUrl: video.streamUrl,
+    description: `${category} · ${duration}. Published through the Telegram bot.`,
+    tags: video.tags?.length ? video.tags : [category, 'Telegram'],
   }
 }
 
@@ -76,7 +71,7 @@ export async function fetchTelegramFeed(): Promise<Video[]> {
     if (!response.ok) return []
     const data = (await response.json()) as { videos?: FeedVideo[] }
     if (!Array.isArray(data.videos)) return []
-    return data.videos.filter((v) => v?.id && v.streamUrl).map(mapFeedVideo)
+    return data.videos.filter((video) => video?.id && video.streamUrl).map(mapFeedVideo)
   } catch {
     return []
   }
