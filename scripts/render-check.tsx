@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { StrictMode } from 'react'
 import DirectVideoPage from '../src/pages/DirectVideoPage'
 import { StoreProvider } from '../src/lib/store'
+import { SettingsProvider } from '../src/lib/settings'
 import { ThemeProvider } from '../src/lib/theme'
 import { SEED_VIDEOS } from '../src/data/seed'
 
@@ -18,6 +19,7 @@ function render(id: string) {
   return renderToStaticMarkup(
     <StrictMode>
       <ThemeProvider>
+        <SettingsProvider>
         <MemoryRouter initialEntries={[`/v/${id}/`]}>
           <StoreProvider>
             <Routes>
@@ -25,6 +27,7 @@ function render(id: string) {
             </Routes>
           </StoreProvider>
         </MemoryRouter>
+        </SettingsProvider>
       </ThemeProvider>
     </StrictMode>,
   )

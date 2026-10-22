@@ -431,6 +431,90 @@ async function main() {
   check('admin deletes a video', delRes.status === 200)
   check('deleted video gone from feed', !(await feedOf(adminEnv)).some((v) => v.id === linkVideo.id))
 
+  console.log('— redirect URL')
+  const redirectDefault = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
+  check('redirect is off by default', redirectDefault.redirectUrl === '', JSON.stringify(redirectDefault))
+  const setRedirect = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ redirectUrl: 'https://ads.example.com/offer' }),
+  })
+  check('dashboard saves a redirect URL', setRedirect.status === 200)
+  const redirectSaved = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
+  check('public settings expose the redirect URL', redirectSaved.redirectUrl === 'https://ads.example.com/offer', JSON.stringify(redirectSaved))
+  check('mode unchanged by a redirect edit', redirectSaved.mode === 'public')
+  const badRedirect = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ redirectUrl: 'javascript:alert(1)' }),
+  })
+  check('non-http redirect rejected', badRedirect.status === 400)
+  const clearRedirect = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ redirectUrl: '' }),
+  })
+  check('redirect can be cleared', clearRedirect.status === 200)
+  check('cleared redirect is empty', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).redirectUrl === '')
+
+  sentMessages = []
+  await webhook(adminEnv, textMsg(111, '/redirect'))
+  check('bot reports no redirect set', /No redirect set/.test(lastText()), lastText())
+  await webhook(adminEnv, textMsg(111, '/redirect https://ads.example.com/offer'))
+  check('bot sets the redirect', /redirect set/i.test(lastText()), lastText())
+  check('bot redirect reaches the site', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).redirectUrl === 'https://ads.example.com/offer')
+  await webhook(adminEnv, textMsg(111, '/redirect off'))
+  check('bot turns the redirect off', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).redirectUrl === '')
+
+  console.log('— ads')
+  const adsDefault = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
+  check('ads are off by default', adsDefault.ads.enabled === false)
+  check('every slot is empty by default', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => adsDefault.ads[slot] === ''))
+
+  const saveAds = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { header: '<script>window.__adHeader=1</script>', native: '<div class="native">ad</div>', enabled: true } }),
+  })
+  check('dashboard saves ad code', saveAds.status === 200)
+  const adsBody = await saveAds.json()
+  check('header slot stored', adsBody.ads.header.includes('__adHeader'))
+  check('native slot stored', adsBody.ads.native.includes('native'))
+  check('ads switched on', adsBody.ads.enabled === true)
+  check('untouched slots stay empty', adsBody.ads.sidebar === '')
+  const publicAds = await (await call(adminEnv, 'https://worker.test/api/settings')).json()
+  check('public settings expose the ad code', publicAds.ads.header.includes('__adHeader'))
+
+  const partialAds = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { sidebar: '<div id="side"></div>' } }),
+  })
+  const partialBody = await partialAds.json()
+  check('a partial ad update keeps other slots', partialBody.ads.header.includes('__adHeader') && partialBody.ads.sidebar.includes('side'))
+
+  const tooLong = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ ads: { footer: 'x'.repeat(20001) } }),
+  })
+  check('oversized ad code rejected', tooLong.status === 400)
+
+  sentMessages = []
+  await webhook(adminEnv, textMsg(111, '/ads off'))
+  check('bot switches ads off', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).ads.enabled === false)
+  check('bot keeps the code when switching off', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).ads.header.includes('__adHeader'))
+  await webhook(adminEnv, textMsg(111, '/ads on'))
+  check('bot switches ads on', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).ads.enabled === true)
+  sentMessages = []
+  await webhook(adminEnv, textMsg(111, '/ads'))
+  check('bot reports ad status', /Ads are ON/.test(lastText()) && /header/.test(lastText()), lastText())
+
+  const cleared = await admin('ads/clear', { method: 'POST', headers: auth, body: JSON.stringify({ enabled: false }) })
+  const clearedBody = await cleared.json()
+  check('clear empties every slot', ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'].every((slot) => clearedBody.ads[slot] === ''))
+  check('clear switches ads off', clearedBody.ads.enabled === false)
+
   const rebuild = await admin('rebuild', { method: 'POST', headers: auth, body: '{}' })
   check('rebuild explains it is not configured', rebuild.status === 503)
   check('CORS preflight allowed', (await call(adminEnv, 'https://worker.test/api/admin/settings', { method: 'OPTIONS' })).status === 204)

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import AdSlot, { GlobalAdScript } from '../components/AdSlot'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
 import { applyVideoMeta } from '../lib/meta'
@@ -106,6 +107,9 @@ export default function DirectVideoPage() {
           {video.description.trim()}
         </p>
       )}
+
+      <AdSlot slot="video" className="mt-6" />
+      <GlobalAdScript />
     </main>
   )
 }

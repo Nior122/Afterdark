@@ -62,6 +62,42 @@ The site ships with a runtime switch, stored in the Worker's KV so it needs no r
 | `public` (default) | The full catalogue: home feed, categories, search, related videos |
 | `direct` | Link-only: no home page, no menu, no related videos, no links between videos. Each video opens **only** from its own URL `/v/<id>/` |
 
+**Home-page redirect.** In `direct` mode the owner can point every non-video URL at an
+external link (an ad/affiliate offer, say). It is a **real 302** issued by
+`functions/_middleware.ts` — not a JavaScript hop — so it works with scripts disabled and ad
+networks see genuine traffic. Never redirected: video pages `/v/<id>/`, the dashboard
+`/admin`, `sitemap.xml`, `robots.txt` and every asset. With no URL set, the home page shows the
+neutral 18+ page instead. Set it from the dashboard (**Site mode → Home-page redirect**) or with
+`/redirect <url>` in the bot; `/redirect off` clears it.
+
+**Every video, old or new.** Videos posted after a build have no prerendered file; the middleware
+serves them a shell with a **200** and the app renders them from the live feed, so a link works
+immediately. They enter `sitemap.xml` on the next build.
+
+### Ads
+
+Owner-pasted ad code, switched on/off live — no rebuild, no redeploy:
+
+| Slot | Where it appears |
+| --- | --- |
+| `header` | Full-width banner under the site header |
+| `native` | In-feed unit at the end of the content column |
+| `sidebar` | Under the sidebar navigation |
+| `footer` | Above the footer, every page |
+| `video` | Under the player on `/v/<id>/` pages |
+| `popunder` | One global script (popunder / interstitial networks) |
+
+Paste each network's snippet in the dashboard's **Ads** tab, then switch ads on (there, or with
+`/ads on` in the bot). Code is injected verbatim and `<script>` tags are re-created so they
+execute — the standard way to run third-party tags. Each slot **reserves its height**, so ads
+never shift the layout, and with ads off (the default) nothing at all is rendered. The dashboard
+stays ad-free so you always have a page that loads without third-party scripts. Ads are limited
+to 20 KB per slot and shown on video pages in both modes.
+
+> Ads are third-party code on your pages: only paste tags from networks you trust, and check what
+> they do to load time. Adult traffic is rejected by most mainstream networks, so test the offer
+> link from the same country as your visitors.
+
 Switch it from the bot (`/mode`) or from the dashboard (`/admin/`) — see
 [docs/telegram-bot-setup.md](docs/telegram-bot-setup.md).
 
@@ -106,7 +142,7 @@ What the bot does:
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
 | Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
 | **Switch site mode** | `/mode` — public catalogue ⇄ direct links only, applied live |
-| **Admin dashboard** | `/admin/` does the same jobs in a web page: mode switch, rename, recategorise, delete, scrape, review/publish drafts, rebuild the site |
+| **Admin dashboard** | `/admin/` does the same jobs in a web page: mode switch, home-page redirect, ad slots, rename, recategorise, delete, scrape, review/publish drafts, rebuild the site. Works in **both** modes |
 
 Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
 and the site plays them through its usual shielded player. Telegram bots can only fetch files
@@ -159,7 +195,8 @@ scripts/
   prerender.mjs       static /v/<id>/ pages, sitemap.xml, robots.txt, 404 shell
   verify.mjs          checks the built HTML against the indexing rules
   verify:dom          mounts the app in jsdom (needs `npm i --no-save jsdom`)
-worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, mode
+functions/_middleware.ts  Pages middleware: direct-mode 302, new-video fallback
+worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, mode, redirect, ads
 ```
 
 ## Troubleshooting: black screen
@@ -260,7 +297,8 @@ is dark and `<div id="root">` is empty. Check, in this order:
 | `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
-| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page, dashboard |
+| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page, dashboard, ad injection |
+| `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, failure modes |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 
 ## Deployment

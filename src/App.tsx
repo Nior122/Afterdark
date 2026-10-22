@@ -16,6 +16,7 @@ import LikedPage from './pages/LikedPage'
 import ResultsPage from './pages/ResultsPage'
 import WatchPage from './pages/WatchPage'
 import NotFoundPage from './pages/NotFoundPage'
+import AdSlot, { GlobalAdScript } from './components/AdSlot'
 
 function ScrollToTop() {
   const { pathname, search } = useLocation()
@@ -41,6 +42,12 @@ export default function App() {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="pt-16 lg:pl-[192px]">
+        <GlobalAdScript />
+        {/* Ads live in reserved-height slots: space is allocated before the
+            network answers, so nothing jumps and the layout stays stable. */}
+        <div className="px-4 pt-3 sm:px-5 xl:px-6">
+          <AdSlot slot="header" />
+        </div>
         <main className="px-4 pb-20 sm:px-5 xl:px-6">
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -57,8 +64,13 @@ export default function App() {
             <Route path="/watch/:id" element={<WatchPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
+          <AdSlot slot="native" className="mt-8" />
         </main>
       </div>
+
+      <footer className="border-t border-line px-4 py-6 sm:px-5 xl:px-6 lg:pl-[192px]">
+        <AdSlot slot="footer" />
+      </footer>
 
       <CreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>

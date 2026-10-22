@@ -168,7 +168,9 @@ you want. Both modes keep every link working.
 | **🗑 Delete n** | Asks for confirmation, then unpublishes |
 | `/rename <id> <new title>` | Rename in one message |
 | `/remove <id>` | Unpublish straight away |
-| `/mode` | Switch between public catalogue and direct links only |
+| `/mode` | Switch between public catalogue and direct links only; also shows the redirect and ad status |
+| `/redirect <url>` | In direct mode, send the home page (and every non-video URL) to that address with a real 302. `/redirect off` clears it, `/redirect` shows the current value |
+| `/ads on` · `/ads off` | Switch the site's ad slots on or off. The code itself is pasted in the dashboard's **Ads** tab |
 | `/pending` | Drafts still waiting for review |
 | `/cancel` | Abort a pending “send me the new title” step |
 | `/id` | Show your Telegram user ID (useful below) |
@@ -190,7 +192,11 @@ Everything the bot does, in a web page: **`https://YOURDOMAIN/admin/`**
    tab only (sessionStorage) — never in the site's JavaScript or in a URL.
 3. You get:
    - **Site mode** — the same on/off switch as `/mode`, with a note when a
-     rebuild is needed.
+     rebuild is needed, plus the **Home-page redirect** field (applies in
+     direct mode only; blank = neutral 18+ page).
+   - **Ads** — paste ad code per slot (header, native, sidebar, footer, video,
+     popunder) and switch ads on/off. Slots reserve their height, so the page
+     never jumps; with ads off nothing renders.
    - **Videos** — every video the bot published: rename inline, change the
      category from a dropdown, delete (with a confirm step), open the source.
    - **Add from link** — paste a URL, scrape it, and land in Drafts.
@@ -228,6 +234,9 @@ to appear on the site automatically:
 | Dashboard says "admin-disabled" | Set the `ADMIN_TOKEN` secret on the Worker and redeploy. |
 | New video isn't in sitemap.xml yet | The sitemap is generated at build time. Press **Rebuild site** in the dashboard (or re-run the deploy workflow) after publishing. Direct links work immediately either way. |
 | Mode switch seems ignored | Confirm `VITE_TELEGRAM_FEED_URL` is set for the **site** build and the site was redeployed after setting it — without it the site has no Worker to ask and stays in public mode. |
+| Home page does not redirect | The redirect only applies in **direct** mode, and it needs `VITE_TELEGRAM_FEED_URL` on the Pages project so `functions/_middleware.ts` can read it. Rules take up to 60 s to refresh (settings are cached at the edge). |
+| Ads do not show | Ads must be switched **on** (dashboard toggle or `/ads on`), the slot must contain code, and the page must be reloaded — the site fetches settings on load. |
+| Ad code appears as text / does nothing | The slot must contain a full tag (e.g. `<script src="…"></script>`), not a bare URL. Check the browser console for the network's own error. |
 | "⚠️ … up to 20 MB" | The video is too big for Telegram bots. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or publish that one via a public `t.me` link instead. |
 | Token leaked | In @BotFather send `/revoke`, put the new token in the `BOT_TOKEN` secret, repeat Step 5. Old file links keep working via the Worker. |
 

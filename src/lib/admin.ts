@@ -1,4 +1,4 @@
-import { FEED_ORIGIN, type SiteMode } from './settings'
+import { AD_SLOT_NAMES, EMPTY_ADS, FEED_ORIGIN, type AdConfig, type SiteMode } from './settings'
 
 /**
  * Client for the Worker's admin API (worker/worker.js).
@@ -43,10 +43,16 @@ export interface AdminDraft {
 export interface AdminSettings {
   mode: SiteMode
   modes: SiteMode[]
+  redirectUrl: string
+  ads: AdConfig
+  slots: string[]
   updatedAt: number | null
+  adsUpdatedAt: number | null
   github: boolean
   feedUrl: string
 }
+
+export { AD_SLOT_NAMES, EMPTY_ADS }
 
 const TOKEN_KEY = 'afterdark.admin.v1'
 
@@ -114,9 +120,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const admin = {
   settings: () => request<AdminSettings>('settings'),
   setMode: (mode: SiteMode) =>
-    request<{ ok: true; mode: SiteMode }>('settings', {
+    request<{ ok: true } & AdminSettings>('settings', {
       method: 'POST',
       body: JSON.stringify({ mode }),
+    }),
+  /** Empty string turns the home-page redirect off. */
+  setRedirect: (redirectUrl: string) =>
+    request<{ ok: true } & AdminSettings>('settings', {
+      method: 'POST',
+      body: JSON.stringify({ redirectUrl }),
+    }),
+  /** Partial ad update: send only the slots that changed, plus `enabled`. */
+  setAds: (ads: Partial<AdConfig>) =>
+    request<{ ok: true } & AdminSettings>('settings', {
+      method: 'POST',
+      body: JSON.stringify({ ads }),
+    }),
+  clearAds: (enabled = false) =>
+    request<{ ok: true } & AdminSettings>('ads/clear', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
     }),
   videos: () => request<{ videos: AdminVideo[]; total: number }>('videos'),
   updateVideo: (id: string, patch: Partial<Pick<AdminVideo, 'title' | 'category' | 'description' | 'tags'>>) =>

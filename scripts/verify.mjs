@@ -98,6 +98,19 @@ for (const video of videos) {
   check(`${video.id}: no internal anchors`, !/<a\s[^>]*href="(\/|\.)/i.test(html))
 }
 
+console.log('— new-video fallback')
+{
+  let shell = ''
+  try {
+    shell = await read('v/_shell.html')
+  } catch {
+    shell = ''
+  }
+  check('fallback shell exists for videos added after the build', shell.length > 0)
+  check('fallback shell is noindex', /<meta name="robots" content="noindex/.test(shell))
+  check('fallback shell is not in the sitemap', !sitemap.includes('_shell'))
+}
+
 console.log('— summary')
 check(`all ${videos.length} video pages prerendered`, pages === videos.length, `${pages} page(s)`)
 console.log(failures ? `\n${failures} check(s) failed` : `\nall checks passed (${pages} video page(s))`)
