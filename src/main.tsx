@@ -4,7 +4,6 @@ import Root from './Root'
 import { SettingsProvider } from './lib/settings'
 import { StoreProvider } from './lib/store'
 import { ThemeProvider } from './lib/theme'
-import AgeGate from './components/AgeGate'
 import './index.css'
 
 // Compatibility: the previous direct-link version used clean /v/<id>/ URLs and
@@ -22,9 +21,9 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider>
       <SettingsProvider>
         <StoreProvider>
-          <AgeGate>
-            <Root />
-          </AgeGate>
+          {/* The router (and the age gate) live inside Root: the gate renders
+              the wordmark, which needs router context. */}
+          <Root />
         </StoreProvider>
       </SettingsProvider>
     </ThemeProvider>

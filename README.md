@@ -162,6 +162,23 @@ scripts/
 worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, mode
 ```
 
+## Troubleshooting: black screen
+
+A completely black page means the HTML loaded but the JavaScript crashed or never ran — the body
+is dark and `<div id="root">` is empty. Check, in this order:
+
+1. **Console** (`F12` → Console, reload). A red `Cannot destructure property 'basename' … as it is null`
+   means a router link was rendered outside a router — that gate/wordmark bug is fixed, but the same
+   class of error blanks the page. Any other red line is the cause.
+2. **View source** (`Ctrl/⌘ + U`) → look at `<base href="…">`. It must match the deployment path:
+   `/` on a domain root (Cloudflare Pages, Vercel), `/<repo>/` on GitHub Pages. A wrong base makes
+   every asset 404 and the page stays blank.
+3. **Asset 404**: copy the `assets/index-….js` name from the source and open it directly. A 404 means
+   the HTML is stale — hard reload (`Ctrl+Shift+R`) or a private window.
+4. **Age gate**: the 18+ interstitial renders on a first visit to any new domain. If the gate itself
+   throws, nothing paints — `npm run verify:bundle` covers exactly that scenario.
+5. `npm run verify:bundle` locally reproduces the visitor experience against the real build.
+
 ## Notes
 
 - The UI is fully responsive: 4-column feed at ≥1168 px, 3/2/1 columns below, off-canvas sidebar on
@@ -243,6 +260,7 @@ worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, 
 | `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
+| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page, dashboard |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 
 ## Deployment
