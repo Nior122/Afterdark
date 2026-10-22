@@ -37,6 +37,52 @@ Nothing is installed on your computer. Everything happens in a browser.
 
 ---
 
+## Already have the Worker and bot? You only *update* it
+
+Nothing gets recreated. The Worker is the same Worker, the KV namespace is the
+same namespace, the bot token and webhook stay exactly as they are — you are
+only replacing the code inside it and adding one new secret. **Five minutes,
+three steps.**
+
+1. Cloudflare → **Workers & Pages** → click your existing worker (e.g.
+   `afterdark-bot`).
+2. **Edit code** → click in the editor → `Ctrl/⌘ + A` → `Delete` → paste the
+   latest <https://raw.githubusercontent.com/Nior122/Afterdark/main/worker/worker.js>
+   → **Deploy**.
+3. **Settings** → **Variables and Secrets** → **Add** → **Secret** →
+   `ADMIN_TOKEN` = a long random string you invent (this is the dashboard
+   password) → **Deploy**.
+
+Then check it worked:
+
+| Open | Old code | Updated code |
+| --- | --- | --- |
+| `/health` | `ok` | `ok` |
+| `/api/settings` | `Not found` (404) | `{"mode":"public","modes":["public","direct"],"updatedAt":…}` |
+
+| Keep exactly as it is | Why |
+| --- | --- |
+| Worker **name** | Its URL is already wired into the website |
+| KV namespace + `VIDEOS` binding | All published videos live there |
+| `BOT_TOKEN`, `WEBHOOK_SECRET` secrets | Re-adding them is harmless but pointless |
+| The `setWebhook` call from Part 5 | The URL hasn't changed — **do not re-run it** |
+| Your owner account (`/start`) | Stored in KV; untouched |
+| Repo variable `VITE_TELEGRAM_FEED_URL` | Already pointing at this Worker |
+
+Do **not** delete the Worker, create a second KV namespace, or run `/start`
+again — none of that is needed, and a second namespace is how people lose
+their video list.
+
+The **website** side is already updated: merging the new code rebuilt and
+redeployed `nior122.github.io/Afterdark`, which is where `/v/<id>/`,
+`sitemap.xml`, `/robots.txt` and `/admin/` came from. If the feed was working
+before, it keeps working.
+
+If anything looks wrong after the update, Cloudflare keeps previous versions
+under your Worker's **Deployments** tab — you can roll back in one click.
+
+---
+
 ## Part 1 — Cloudflare account and your `.workers.dev` address
 
 1. Sign in at <https://dash.cloudflare.com>.
