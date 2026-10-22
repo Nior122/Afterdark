@@ -100,15 +100,61 @@ automatically (give it up to a minute for caches).
 
 ## Daily use
 
-- **Publish:** forward/send a video to the bot.
-  - First line of the caption = **title**
-  - `#Hashtags` = **tags**; one matching a site category sets the
-    **category** — use underscores for multi-word ones: `#POV`, `#MILF`,
-    `#Big_Ass`, `#Big_Tits`, `#4K_Ultra_HD`. No match → `Homemade`.
-  - No caption → the file name becomes the title.
-- **`/list`** — see your latest published videos and their ids.
-- **`/remove tg-xxxxxxxxxxxx`** — take a video off the website.
-- **`/id`** — show your Telegram user ID (useful below).
+### Publish a video file
+Forward/send a video to the bot — it is published immediately, exactly as before.
+
+- First line of the caption = **title**
+- `#Hashtags` = **tags**; one matching a site category sets the
+  **category** — use underscores for multi-word ones: `#POV`, `#MILF`,
+  `#Big_Ass`, `#Big_Tits`, `#4K_Ultra_HD`. No match → `Homemade`.
+- No caption → the file name becomes the title.
+
+### Publish from a link (scrape → review → confirm)
+Paste a link (or `/add <link>`) and the bot scrapes the page:
+
+- **One video page** → title, poster, description, duration, playable
+  embed/`og:video` source and inferred category.
+- **A gallery / category page** → every video it can find on that page
+  (up to 24), each with its own title, thumbnail, link and category.
+
+Nothing is public yet. The bot replies with a **draft card** (or a batch
+summary) and buttons:
+
+| Button | What it does |
+| --- | --- |
+| ✅ Publish | Publishes that one draft |
+| ✏️ Edit title | Bot asks for a new title, then shows the updated card |
+| 🏷 Category | Category picker (25 site categories) |
+| ❌ Cancel | Discards the draft — nothing is published |
+
+For a gallery: **✅ Publish all**, **🔎 Review each**, or **❌ Cancel all**.
+Drafts expire after 7 days and never appear on the site until published.
+
+Some sites block server-side requests (403 / JavaScript challenge). When that
+happens the bot says so and suggests the alternative: paste the direct
+embed/player link (e.g. `…/embed/abc123/`), forward the file, or share a
+public `t.me` post.
+
+### Manage what is published
+
+| Command / button | What it does |
+| --- | --- |
+| `/videos` (or `/list`) | Every video the bot published, with ids, categories, durations and page buttons |
+| **✏️ Rename n** | Ask for a new title and save it |
+| **🗑 Delete n** | Asks for confirmation, then unpublishes |
+| `/rename <id> <new title>` | Rename in one message |
+| `/remove <id>` | Unpublish straight away |
+| `/pending` | Drafts still waiting for review |
+| `/cancel` | Abort a pending “send me the new title” step |
+| `/id` | Show your Telegram user ID (useful below) |
+
+The list is paged 5 at a time, so it works with hundreds of videos. Renames and
+deletions reach the website within about a minute (the feed is cached for 60 s).
+
+**Note:** the bot can only manage videos it published (Telegram files and
+scraped links). The catalogue videos hard-coded in the website's
+`src/data/seed.ts` are part of the site build, not the feed, so they are not
+editable from Telegram.
 
 ## Optional: auto-post everything from your own channel
 
@@ -129,6 +175,9 @@ to appear on the site automatically:
 | Bot never replies | Redo Step 5 (check for typos). Verify with `https://api.telegram.org/bot<TOKEN>/getWebhookInfo` — `url` must be your Worker URL. |
 | "🚫 You are not authorised" | Someone else sent `/start` first, or you use a second account. Send `/id`, then set a Worker variable `ALLOWED_USER_IDS` to your ID and deploy. |
 | Bot says posted, site doesn't show it | Wait ~1 minute; make sure Step 7's variable is set and the site was redeployed **after** setting it. Check `https://<YOUR_WORKER>.workers.dev/api/videos` in a browser — the video should be listed there. |
+| "I could not read that page" | The site blocked the Worker (403/Cloudflare challenge/JS-only). Paste the direct embed link, forward the file, or use a public `t.me` post. |
+| Scraped video has the wrong title | Press ✏️ Edit title on the draft card before publishing, or /rename the id afterwards. |
+| Wrong category | 🏷 Category on the draft card; re-infer it from the page's keywords if they were unclear. |
 | "⚠️ … up to 20 MB" | The video is too big for Telegram bots. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or publish that one via a public `t.me` link instead. |
 | Token leaked | In @BotFather send `/revoke`, put the new token in the `BOT_TOKEN` secret, repeat Step 5. Old file links keep working via the Worker. |
 
