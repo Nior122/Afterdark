@@ -4,6 +4,7 @@ import {
   ExternalLink,
   Film,
   Globe,
+  Megaphone,
   Loader2,
   LogOut,
   Pencil,
@@ -27,7 +28,13 @@ import {
 } from '../lib/admin'
 import { applyNeutralMeta } from '../lib/meta'
 import { adminPath } from '../lib/site'
-import { useSiteSettings } from '../lib/settings'
+import {
+  AD_SLOT_NAMES,
+  EMPTY_ADS,
+  useSiteSettings,
+  type AdConfig,
+  type AdSlotName,
+} from '../lib/settings'
 
 /**
  * Owner dashboard.
@@ -39,7 +46,7 @@ import { useSiteSettings } from '../lib/settings'
  * held in sessionStorage for this tab only.
  */
 
-type Tab = 'videos' | 'add' | 'drafts'
+type Tab = 'videos' | 'add' | 'drafts' | 'ads'
 
 const CATEGORY_OPTIONS = [...CATEGORIES]
 
@@ -75,6 +82,10 @@ export default function AdminPage() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState('')
   const [scrapeUrl, setScrapeUrl] = useState('')
+  const [redirectDraft, setRedirectDraft] = useState('')
+  const [adDraft, setAdDraft] = useState<AdConfig>(() => ({ ...EMPTY_ADS }))
+  // Unsaved ad edits must not be overwritten by a background refresh.
+  const [adsDirty, setAdsDirty] = useState(false)
 
   useEffect(() => {
     applyNeutralMeta()
@@ -90,7 +101,9 @@ export default function AdminPage() {
     setSettings(nextSettings)
     setVideos(nextVideos.videos)
     setDrafts(nextDrafts.drafts)
-  }, [])
+    setRedirectDraft(nextSettings.redirectUrl || '')
+    setAdDraft((current) => (adsDirty ? current : { ...EMPTY_ADS, ...nextSettings.ads }))
+  }, [adsDirty])
 
   const signIn = useCallback(
     async (value: string) => {
@@ -143,6 +156,54 @@ export default function AdminPage() {
           : 'Public catalogue is back, with the home feed and related videos.',
       )
     })
+
+  const saveRedirect = () =>
+    run('redirect', async () => {
+      const result = await admin.setRedirect(redirectDraft.trim())
+      setSettings(result)
+      setRedirectDraft(result.redirectUrl || '')
+      setNotice(
+        result.redirectUrl
+          ? 'Redirect saved. It applies whenever the site is in direct-link mode.'
+          : 'Redirect cleared. In direct-link mode the home page shows a neutral 18+ page.',
+      )
+    })
+
+  const saveAds = () =>
+    run('ads', async () => {
+      const result = await admin.setAds(adDraft)
+      setSettings(result)
+      setAdDraft({ ...EMPTY_ADS, ...result.ads })
+      setAdsDirty(false)
+      setNotice(
+        result.ads.enabled
+          ? 'Ad code saved and switched on. Reload the site to see it.'
+          : 'Ad code saved. Switch ads on when you are ready for them to show.',
+      )
+    })
+
+  const toggleAds = () =>
+    run('ads-toggle', async () => {
+      const result = await admin.setAds({ enabled: !(settings?.ads.enabled ?? false) })
+      setSettings(result)
+      setAdDraft({ ...EMPTY_ADS, ...result.ads })
+      setAdsDirty(false)
+      setNotice(result.ads.enabled ? 'Ads are ON across the site.' : 'Ads are OFF. Your code is kept.')
+    })
+
+  const clearAds = () =>
+    run('ads-clear', async () => {
+      const result = await admin.clearAds(false)
+      setSettings(result)
+      setAdDraft({ ...EMPTY_ADS, ...result.ads })
+      setAdsDirty(false)
+      setNotice('All ad slots cleared.')
+    })
+
+  function updateAd(slot: AdSlotName, value: string) {
+    setAdDraft((current) => ({ ...current, [slot]: value }))
+    setAdsDirty(true)
+  }
 
   async function handleSignIn(event: FormEvent) {
     event.preventDefault()
@@ -283,11 +344,63 @@ export default function AdminPage() {
             <strong>Rebuild site</strong> to add them.
           </p>
         )}
+
+        {/* Home-page redirect: what happens to every non-video URL in direct mode */}
+        <div className="mt-4 border-t border-line pt-4">
+          <label htmlFor="redirect-url" className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+            <ExternalLink size={14} className="text-brand-600" /> Home-page redirect
+          </label>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
+            While the site is in <strong>direct-link</strong> mode, anyone opening the bare domain (or any
+            page that is not a video link) is sent here with a real 302. Video links, the dashboard,
+            sitemap and robots are never redirected. Leave it empty to show the neutral 18+ page instead.
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              id="redirect-url"
+              type="url"
+              inputMode="url"
+              placeholder="https://example.com/offer"
+              value={redirectDraft}
+              onChange={(event) => setRedirectDraft(event.target.value)}
+              className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-[13px] text-ink outline-none focus:border-brand-500"
+            />
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={saveRedirect}
+                disabled={busy === 'redirect'}
+                className="flex h-10 items-center gap-1.5 rounded-lg bg-action px-3.5 text-[12.5px] font-semibold text-on-action disabled:opacity-50"
+              >
+                {busy === 'redirect' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRedirectDraft('')
+                  void run('redirect', async () => {
+                    const result = await admin.setRedirect('')
+                    setSettings(result)
+                    setNotice('Redirect cleared — direct mode shows the neutral 18+ page.')
+                  })
+                }}
+                disabled={busy === 'redirect' || !settings?.redirectUrl}
+                className="h-10 rounded-lg border border-line px-3 text-[12.5px] font-semibold text-muted disabled:opacity-40"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-muted">
+            Active: {settings?.redirectUrl ? <span className="font-semibold text-ink">{settings.redirectUrl}</span> : 'off'}
+          </p>
+        </div>
       </section>
 
       {/* Tabs */}
       <div className="mt-6 flex items-center gap-2 border-b border-line pb-2">
-        {(['videos', 'add', 'drafts'] as Tab[]).map((name) => (
+        {(['videos', 'add', 'drafts', 'ads'] as Tab[]).map((name) => (
           <button
             key={name}
             type="button"
@@ -296,7 +409,13 @@ export default function AdminPage() {
               tab === name ? 'bg-action text-on-action' : 'text-muted hover:bg-raise hover:text-ink'
             }`}
           >
-            {name === 'drafts' ? `Drafts (${drafts.length})` : name === 'add' ? 'Add from link' : `Videos (${videos.length})`}
+            {name === 'drafts'
+              ? `Drafts (${drafts.length})`
+              : name === 'add'
+                ? 'Add from link'
+                : name === 'ads'
+                  ? `Ads${settings?.ads.enabled ? ' ✓' : ''}`
+                  : `Videos (${videos.length})`}
           </button>
         ))}
       </div>
@@ -365,6 +484,111 @@ export default function AdminPage() {
               Scrape
             </button>
           </form>
+        </section>
+      )}
+
+      {tab === 'ads' && (
+        <section className="mt-4 rounded-2xl border border-line bg-panel p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-1.5 text-[14px] font-bold text-ink">
+                <Megaphone size={15} className="text-brand-600" /> Ad code
+              </h2>
+              <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-muted">
+                Paste each network's code into the slot where it should appear. It is injected exactly as
+                given, on every page, in both modes — popunders, native units, banners, iframes. Slots
+                reserve their height, so the page does not jump when an ad loads.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[12px] font-semibold ${settings?.ads.enabled ? 'text-brand-600' : 'text-muted'}`}>
+                {settings?.ads.enabled ? 'Ads on' : 'Ads off'}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(settings?.ads.enabled)}
+                aria-label="Toggle ads"
+                onClick={toggleAds}
+                disabled={busy === 'ads-toggle'}
+                className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${
+                  settings?.ads.enabled ? 'bg-brand-600' : 'bg-faint'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                    settings?.ads.enabled ? 'left-6' : 'left-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4">
+            {(
+              [
+                ['header', 'Header banner', 'Full-width leaderboard under the site header.'],
+                ['native', 'Native / in-feed', 'Between sections at the end of the content column.'],
+                ['sidebar', 'Sidebar', 'In the left navigation, under the links.'],
+                ['footer', 'Footer', 'Above the footer, on every page.'],
+                ['video', 'Video page', 'Under the player on /v/<id>/ pages.'],
+                ['popunder', 'Popunder / interstitial', 'One global script. Fires once per page view.'],
+              ] as [AdSlotName, string, string][]
+            ).map(([slot, label, hint]) => (
+              <div key={slot}>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor={`ad-${slot}`} className="text-[12.5px] font-semibold text-ink">
+                    {label}
+                  </label>
+                  <span className="text-[11px] text-muted">
+                    {adDraft[slot].length ? `${adDraft[slot].length} chars` : 'empty'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11.5px] text-muted">{hint}</p>
+                <textarea
+                  id={`ad-${slot}`}
+                  value={adDraft[slot]}
+                  onChange={(event) => updateAd(slot, event.target.value)}
+                  rows={slot === 'popunder' ? 3 : 3}
+                  spellCheck={false}
+                  placeholder={slot === 'popunder' ? '<script src="…"></script>' : '<script>…</script> or <iframe …>'}
+                  className="mt-1.5 w-full resize-y rounded-lg border border-line bg-surface px-3 py-2 font-mono text-[11.5px] leading-relaxed text-ink outline-none focus:border-brand-500"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={saveAds}
+              disabled={busy === 'ads'}
+              className="flex h-10 items-center gap-1.5 rounded-lg bg-action px-4 text-[12.5px] font-semibold text-on-action disabled:opacity-50"
+            >
+              {busy === 'ads' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              Save ad code
+            </button>
+            <button
+              type="button"
+              onClick={clearAds}
+              disabled={busy === 'ads-clear'}
+              className="flex h-10 items-center gap-1.5 rounded-lg border border-line px-3 text-[12.5px] font-semibold text-muted disabled:opacity-40"
+            >
+              <Trash2 size={13} /> Clear all slots
+            </button>
+            {adsDirty && (
+              <span className="text-[11.5px] font-semibold text-brand-700">Unsaved changes</span>
+            )}
+            <span className="ml-auto text-[11.5px] text-muted">
+              {settings?.slots?.length ?? AD_SLOT_NAMES.length} slots · 20 KB per slot
+            </span>
+          </div>
+
+          <p className="mt-3 rounded-lg bg-brand-50 px-3 py-2 text-[12px] leading-relaxed text-brand-700">
+            Ads also show on video links in direct mode, and on the dashboard? No — the dashboard stays
+            clean so you always have a page that loads without third-party scripts. The bot can switch
+            them on or off with <Code>/ads on</Code> / <Code>/ads off</Code>.
+          </p>
         </section>
       )}
 

@@ -281,6 +281,13 @@ async function main() {
   await writeFile(join(dist, 'index.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
   await writeFile(join(dist, '404.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
 
+  // A video page for an id that has no prerendered file (posted after this
+  // build). functions/_middleware.ts serves this file with a 200 instead of a
+  // 404, and the app renders the video from the live feed — so every video,
+  // old or new, opens from its own link in both modes.
+  await mkdir(join(dist, 'v'), { recursive: true })
+  await writeFile(join(dist, 'v', '_shell.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
+
   console.log(
     `✓ prerendered ${videos.length} video page(s), admin page, sitemap.xml (${videos.length} URL${videos.length === 1 ? '' : 's'}) and robots.txt for ${SITE_URL}`,
   )

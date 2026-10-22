@@ -187,7 +187,14 @@ async function handleSettings(env) {
   } catch {
     updatedAt = null
   }
-  return json({ mode, modes: MODES, updatedAt }, 200, { 'Cache-Control': 'no-store' })
+  const [redirectUrl, ads] = await Promise.all([readRedirect(env), readAds(env)])
+  return json(
+    { mode, modes: MODES, updatedAt, redirectUrl, ads },
+    200,
+    // The site asks on every load; never let a switch (or an ad edit) sit in a
+    // cache. `Vary` keeps shared caches honest.
+    { 'Cache-Control': 'no-store', Vary: 'Accept-Encoding' },
+  )
 }
 
 async function writeMode(env, mode) {
@@ -195,6 +202,103 @@ async function writeMode(env, mode) {
   await env.VIDEOS.put('cfg:mode', mode)
   await env.VIDEOS.put('cfg:mode:at', String(Date.now()))
   return true
+}
+
+/* ------------------------------ redirect URL ------------------------------ */
+
+/**
+ * Where the home page (and every other non-video URL) sends visitors while
+ * direct-link mode is on. Empty string = off, which is the safe default: the
+ * site then shows the neutral 18+ page instead of redirecting anywhere.
+ */
+const MAX_REDIRECT_LENGTH = 2048
+
+async function readRedirect(env) {
+  try {
+    return String((await env.VIDEOS.get('cfg:redirect')) || '')
+  } catch {
+    return ''
+  }
+}
+
+/** Returns `{ url }` (empty = off) or `{ error }` with a message for the owner. */
+function validateRedirect(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.toLowerCase() === 'off' || raw.toLowerCase() === 'none') return { url: '' }
+  if (raw.length > MAX_REDIRECT_LENGTH) {
+    return { error: `That URL is too long (limit ${MAX_REDIRECT_LENGTH} characters).` }
+  }
+  try {
+    const parsed = new URL(raw)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { error: 'The redirect URL must start with http:// or https://.' }
+    }
+    return { url: parsed.toString() }
+  } catch {
+    return { error: 'That is not a valid URL. Include https:// at the start.' }
+  }
+}
+
+async function writeRedirect(env, url) {
+  await env.VIDEOS.put('cfg:redirect', url)
+  await env.VIDEOS.put('cfg:redirect:at', String(Date.now()))
+}
+
+/* --------------------------------- ad slots ------------------------------- */
+
+/**
+ * Ad code the owner pastes into the dashboard. Each slot is raw HTML (usually
+ * an ad network's <script> or <iframe>); the site injects it verbatim, so this
+ * endpoint is public — it only ever contains what the owner chose to publish.
+ *
+ *   header   leaderboard under the site header
+ *   native   an in-feed unit between sections
+ *   sidebar  under the sidebar navigation
+ *   footer   above the footer
+ *   video    under the player on a video page
+ *   popunder a single global script (popunder / interstitial networks)
+ */
+const AD_SLOTS = ['header', 'native', 'sidebar', 'footer', 'video', 'popunder']
+const MAX_AD_CODE = 20000
+
+function emptyAds() {
+  const ads = { enabled: false }
+  for (const slot of AD_SLOTS) ads[slot] = ''
+  return ads
+}
+
+async function readAds(env) {
+  const ads = emptyAds()
+  try {
+    const raw = await env.VIDEOS.get('cfg:ads')
+    if (!raw) return ads
+    const parsed = JSON.parse(raw)
+    ads.enabled = Boolean(parsed.enabled)
+    for (const slot of AD_SLOTS) {
+      if (typeof parsed[slot] === 'string') ads[slot] = parsed[slot]
+    }
+    return ads
+  } catch {
+    return ads
+  }
+}
+
+/** Merge a patch into the stored ad config. Returns `{ ads }` or `{ error }`. */
+async function writeAds(env, patch) {
+  const next = await readAds(env)
+  if (patch && typeof patch.enabled === 'boolean') next.enabled = patch.enabled
+  for (const slot of AD_SLOTS) {
+    const value = patch?.[slot]
+    if (value === undefined) continue
+    if (typeof value !== 'string') return { error: `Ad slot "${slot}" must be text.` }
+    if (value.length > MAX_AD_CODE) {
+      return { error: `Ad slot "${slot}" is too long (limit ${MAX_AD_CODE} characters).` }
+    }
+    next[slot] = value
+  }
+  await env.VIDEOS.put('cfg:ads', JSON.stringify(next))
+  await env.VIDEOS.put('cfg:ads:at', String(Date.now()))
+  return { ads: next }
 }
 
 /* -------------------------------- admin API ------------------------------- */
@@ -266,23 +370,37 @@ async function handleAdmin(request, env, url) {
 
   // --- settings ---------------------------------------------------------
   if (path === 'settings' && method === 'GET') {
-    return json(
-      {
-        mode: await readMode(env),
-        modes: MODES,
-        updatedAt: Number(await env.VIDEOS.get('cfg:mode:at')) || null,
-        github: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO),
-        feedUrl: new URL(request.url).origin,
-      },
-      200,
-      cors,
-    )
+    return json(await settingsSnapshot(env, request), 200, cors)
   }
   if (path === 'settings' && method === 'POST') {
-    if (!(await writeMode(env, body.mode))) {
+    // Partial update: send only what changed (mode, redirectUrl, ads).
+    if (body.mode !== undefined && !MODES.includes(body.mode)) {
       return json({ error: 'bad-mode', message: `mode must be one of ${MODES.join(', ')}` }, 400, cors)
     }
-    return json({ ok: true, mode: await readMode(env), updatedAt: Date.now() }, 200, cors)
+    let redirectUrl
+    if (body.redirectUrl !== undefined) {
+      const parsed = validateRedirect(body.redirectUrl)
+      if (parsed.error) return json({ error: 'bad-redirect', message: parsed.error }, 400, cors)
+      redirectUrl = parsed.url
+    }
+    if (body.ads !== undefined && (typeof body.ads !== 'object' || body.ads === null)) {
+      return json({ error: 'bad-ads', message: 'ads must be an object of slots.' }, 400, cors)
+    }
+
+    if (body.mode !== undefined && !(await writeMode(env, body.mode))) {
+      return json({ error: 'bad-mode', message: `mode must be one of ${MODES.join(', ')}` }, 400, cors)
+    }
+    if (redirectUrl !== undefined) await writeRedirect(env, redirectUrl)
+    if (body.ads !== undefined) {
+      const result = await writeAds(env, body.ads)
+      if (result.error) return json({ error: 'bad-ads', message: result.error }, 400, cors)
+    }
+    return json({ ok: true, ...(await settingsSnapshot(env, request)) }, 200, cors)
+  }
+  if (path === 'ads/clear' && method === 'POST') {
+    const result = await writeAds(env, { ...emptyAds(), enabled: Boolean(body.enabled) })
+    if (result.error) return json({ error: 'bad-ads', message: result.error }, 400, cors)
+    return json({ ok: true, ...(await settingsSnapshot(env, request)) }, 200, cors)
   }
 
   // --- videos ------------------------------------------------------------
@@ -440,6 +558,22 @@ async function handleAdmin(request, env, url) {
   }
 
   return json({ error: 'not-found', message: `Unknown admin endpoint ${path}` }, 404, cors)
+}
+
+/** Everything the dashboard needs about site configuration, in one call. */
+async function settingsSnapshot(env, request) {
+  const [mode, redirectUrl, ads] = await Promise.all([readMode(env), readRedirect(env), readAds(env)])
+  return {
+    mode,
+    modes: MODES,
+    redirectUrl,
+    ads,
+    slots: AD_SLOTS,
+    updatedAt: Number(await env.VIDEOS.get('cfg:mode:at')) || null,
+    adsUpdatedAt: Number(await env.VIDEOS.get('cfg:ads:at')) || null,
+    github: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO),
+    feedUrl: new URL(request.url).origin,
+  }
 }
 
 async function listDrafts(env) {
@@ -606,7 +740,8 @@ async function processMessage(msg, env) {
         '• Caption\'s first line becomes the title\n' +
         '• #Hashtags become tags; one matching a category (e.g. #POV, #Big_Ass) sets the category\n' +
         '• Videos must be 20 MB or smaller (Telegram bot limit)\n\n' +
-        'Commands: /videos · /pending · /add <url> · /rename <id> <title> · /remove <id> · /mode · /id\n' +
+        'Commands: /videos · /pending · /add <url> · /rename <id> <title> · /remove <id> · /id\n' +
+        'Site: /mode · /redirect <url|off> · /ads <on|off>\n' +
         'Nothing scraped is published until you press ✅ Publish.')
     }
     if (command === '/id') {
@@ -619,6 +754,51 @@ async function processMessage(msg, env) {
     if (command === '/mode') {
       if (!owner.isOwner) return deny(env, chatId, userId)
       return sendModePicker(env, chatId)
+    }
+    if (command === '/redirect') {
+      if (!owner.isOwner) return deny(env, chatId, userId)
+      if (!arg) {
+        const current = await readRedirect(env)
+        return send(env, chatId,
+          current
+            ? `↪️ In direct-link mode the home page redirects to:\n${current}\n\n` +
+              'Change it with /redirect <url>, or turn it off with /redirect off.'
+            : '↪️ No redirect set. In direct-link mode the home page shows a neutral 18+ page.\n\n' +
+              'Set one with /redirect https://example.com — visitors who open the bare domain ' +
+              'are sent there while direct-link mode is on.')
+      }
+      const parsed = validateRedirect(arg)
+      if (parsed.error) return send(env, chatId, `⚠️ ${parsed.error}`)
+      await writeRedirect(env, parsed.url)
+      return send(env, chatId,
+        parsed.url
+          ? `✅ Home-page redirect set to:\n${parsed.url}\n\n` +
+            'It only applies while the site is in direct-link mode (/mode).'
+          : '✅ Redirect turned off. In direct-link mode the home page now shows a neutral page.')
+    }
+    if (command === '/ads') {
+      if (!owner.isOwner) return deny(env, chatId, userId)
+      const ads = await readAds(env)
+      const filled = AD_SLOTS.filter((slot) => ads[slot])
+      const wanted = arg.toLowerCase()
+      if (!wanted) {
+        return send(env, chatId,
+          `📢 Ads are ${ads.enabled ? 'ON' : 'OFF'}.\n` +
+          (filled.length
+            ? `Slots with code: ${filled.join(', ')}\n`
+            : 'No ad code yet — paste it in the dashboard under the Ads tab.\n') +
+          '\n/ads on · /ads off — the code itself is edited in the dashboard (/admin).')
+      }
+      if (wanted !== 'on' && wanted !== 'off') {
+        return send(env, chatId, 'Usage: /ads on or /ads off. Paste the ad code in the dashboard Ads tab.')
+      }
+      const result = await writeAds(env, { enabled: wanted === 'on' })
+      if (result.error) return send(env, chatId, `⚠️ ${result.error}`)
+      return send(env, chatId,
+        wanted === 'on'
+          ? '✅ Ads are ON for every page.\n' +
+            (filled.length ? `Showing: ${filled.join(', ')}.` : 'No ad code saved yet — add it in /admin → Ads.')
+          : '✅ Ads are OFF. The saved code is kept; switch them back on any time with /ads on.')
     }
     if (command === '/pending') {
       if (!owner.isOwner) return deny(env, chatId, userId)
@@ -1487,10 +1667,13 @@ async function sendVideoList(env, chatId, page = 0) {
  * reads it at runtime, so switching needs no rebuild.
  */
 async function sendModePicker(env, chatId) {
-  const mode = await readMode(env)
+  const [mode, redirectUrl, ads] = await Promise.all([readMode(env), readRedirect(env), readAds(env)])
   const mark = (value) => (mode === value ? '✓ ' : '')
+  const filled = AD_SLOTS.filter((slot) => ads[slot]).length
   return sendWithKeyboard(env, chatId,
-    `⚙️ Site mode: ${mode === 'direct' ? 'Direct links only' : 'Public catalogue'}\n\n` +
+    `⚙️ Site mode: ${mode === 'direct' ? 'Direct links only' : 'Public catalogue'}\n` +
+    `↪️ Home redirect: ${redirectUrl || 'off (neutral 18+ page)'}\n` +
+    `📢 Ads: ${ads.enabled ? 'ON' : 'OFF'}${filled ? ` · ${filled} slot${filled === 1 ? '' : 's'} filled` : ''}\n\n` +
     '• Public catalogue — home feed, categories, search and related videos\n' +
     '• Direct links only — every video opens only from its own link, no navigation, ' +
     'no related videos; Google/Bing find the pages through sitemap.xml\n\n' +
@@ -1508,8 +1691,9 @@ async function setModeFromBot(env, chatId, mode, messageId) {
   if (mode === 'dashboard') {
     return send(env, chatId,
       '📊 The dashboard is a web page on the site: /admin\n' +
-      'Sign in with the ADMIN_TOKEN you set on the Worker. It can do everything here — ' +
-      'list, rename, delete, scrape links, review drafts and switch this mode.')
+      'Sign in with the ADMIN_TOKEN you set on the Worker. It works in both modes and can do ' +
+      'everything here — list, rename, delete, scrape links, review drafts, switch the mode, ' +
+      'set the home-page redirect and paste ad code.')
   }
   if (!(await writeMode(env, mode))) return send(env, chatId, 'Unknown mode.')
   if (messageId) {

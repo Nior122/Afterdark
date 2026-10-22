@@ -48,8 +48,22 @@ const onlyWorker = (behaviour) => (input, init) => {
   return behaviour(url, init)
 }
 
-const okWorker = (mode) => onlyWorker((url) => {
-  if (url.endsWith('/api/settings')) return Promise.resolve(new Response(JSON.stringify({ mode }), { status: 200 }))
+const adsFixture = {
+  enabled: true,
+  header: '<div id="ad-header-probe">HEADER AD</div>',
+  native: '<div id="ad-native-probe">NATIVE AD</div>',
+  sidebar: '',
+  footer: '',
+  video: '<div id="ad-video-probe">VIDEO AD</div>',
+  popunder: '<script>window.__popunderProbe = true</script>',
+}
+
+const adsFixture_ = { enabled: false, header: '', native: '', sidebar: '', footer: '', video: '', popunder: '' }
+
+const okWorker = (mode, extra = {}) => onlyWorker((url) => {
+  if (url.endsWith('/api/settings')) {
+    return Promise.resolve(new Response(JSON.stringify({ mode, redirectUrl: '', ads: { ...adsFixture_, ...(extra.ads || {}) } }), { status: 200 }))
+  }
   if (url.endsWith('/api/videos')) return Promise.resolve(new Response(JSON.stringify({ videos: [] }), { status: 200 }))
   if (url.includes('/api/admin/')) return Promise.resolve(new Response(JSON.stringify({ mode, modes: ['public', 'direct'], videos: [], drafts: [] }), { status: 200 }))
   return Promise.resolve(new Response('{}', { status: 200 }))
@@ -102,6 +116,42 @@ const scenarios = [
     fetch: okWorker('public'),
     expect: (text) => /Owner sign-in|ADMIN_TOKEN/i.test(text),
   },
+  {
+    name: 'dashboard is reachable in direct mode too',
+    path: '/admin/',
+    fetch: okWorker('direct'),
+    expect: (text) => /Owner sign-in|ADMIN_TOKEN/i.test(text),
+  },
+  {
+    name: 'ad slots render the owner code',
+    path: '/',
+    fetch: okWorker('public', { ads: adsFixture }),
+    accepted: true,
+    expect: (text) => /HEADER AD/.test(text) && /NATIVE AD/.test(text),
+    probes: (window) => [
+      ['header slot injected', Boolean(window.document.querySelector('[data-ad-slot="header"] #ad-header-probe'))],
+      ['native slot injected', Boolean(window.document.querySelector('[data-ad-slot="native"] #ad-native-probe'))],
+      ['no empty sidebar slot', !window.document.querySelector('[data-ad-slot="sidebar"]')],
+    ],
+  },
+  {
+    name: 'ads switched off render nothing',
+    path: '/',
+    fetch: okWorker('public', { ads: { ...adsFixture, enabled: false } }),
+    accepted: true,
+    expect: (text) => !/HEADER AD/.test(text),
+    probes: (window) => [['no ad containers at all', window.document.querySelectorAll('[data-ad-slot]').length === 0]],
+  },
+  {
+    name: 'video page shows its own ad slot',
+    path: '/v/v-pov-kat-mar10/',
+    fetch: okWorker('direct', { ads: adsFixture }),
+    accepted: true,
+    expect: (text) => /VIDEO AD/.test(text),
+    probes: (window) => [
+      ['video slot injected', Boolean(window.document.querySelector('[data-ad-slot="video"] #ad-video-probe'))],
+    ],
+  },
 ]
 
 let failures = 0
@@ -145,6 +195,9 @@ for (const [index, scenario] of scenarios.entries()) {
     if (!text) problems.push('page is empty (black screen)')
     if (text && !scenario.expect(text)) problems.push(`unexpected content: ${text.slice(0, 120)}`)
     if (scenario.noAnchors && anchors > 0) problems.push(`${anchors} anchor(s) on a standalone video page`)
+    for (const [label, ok] of scenario.probes?.(window) ?? []) {
+      if (!ok) problems.push(label)
+    }
     if (errors.length) problems.push(`errors: ${errors.slice(0, 2).join(' | ')}`)
 
     if (problems.length) {

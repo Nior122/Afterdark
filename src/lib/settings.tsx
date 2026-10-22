@@ -9,19 +9,43 @@ import {
 } from 'react'
 
 /**
- * Site mode, controlled from the Telegram bot or the admin dashboard.
+ * Site configuration, owned by the Worker and read at runtime.
  *
- *   'public' — the normal tube catalogue: home feed, categories, related videos.
- *   'direct' — every video opens only from its own `/v/<id>/` link. The home
- *              page and menus are hidden, nothing links to another video, and
- *              search engines find pages through sitemap.xml.
+ *   mode        'public' = normal tube catalogue; 'direct' = every video opens
+ *               only from its own /v/<id>/ link, home page is a neutral page
+ *               (or a redirect, see `redirectUrl`).
+ *   redirectUrl where the home page sends visitors while `mode` is 'direct'
+ *               (enforced by functions/_middleware.ts as a real 302).
+ *   ads         owner-pasted ad code per slot, plus an on/off switch.
  *
- * The value lives in the Worker's KV (`cfg:mode`) and is fetched at runtime,
- * so switching modes needs no rebuild. If the feed is not configured, or the
- * request fails, the site stays in 'public' exactly as before.
+ * Everything is fetched from `GET /api/settings`, so the owner can change any
+ * of it from the Telegram bot or the dashboard without a rebuild.
  */
 
 export type SiteMode = 'public' | 'direct'
+
+export const AD_SLOT_NAMES = ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'] as const
+export type AdSlotName = (typeof AD_SLOT_NAMES)[number]
+
+export interface AdConfig {
+  enabled: boolean
+  header: string
+  native: string
+  sidebar: string
+  footer: string
+  video: string
+  popunder: string
+}
+
+export const EMPTY_ADS: AdConfig = {
+  enabled: false,
+  header: '',
+  native: '',
+  sidebar: '',
+  footer: '',
+  video: '',
+  popunder: '',
+}
 
 const FEED_BASE = (import.meta.env.VITE_TELEGRAM_FEED_URL as string | undefined)?.replace(
   /\/+$/,
@@ -29,6 +53,12 @@ const FEED_BASE = (import.meta.env.VITE_TELEGRAM_FEED_URL as string | undefined)
 )
 
 const CACHE_KEY = 'afterdark.mode.v1'
+
+export interface SiteSettings {
+  mode: SiteMode
+  redirectUrl: string
+  ads: AdConfig
+}
 
 /** Last known mode, so a reload does not flash the wrong layout. */
 function cachedMode(): SiteMode | null {
@@ -41,28 +71,55 @@ function cachedMode(): SiteMode | null {
   }
 }
 
-export async function fetchSiteMode(): Promise<SiteMode | null> {
-  if (!FEED_BASE) return 'public'
+function normaliseAds(value: unknown): AdConfig {
+  const ads: AdConfig = { ...EMPTY_ADS }
+  if (!value || typeof value !== 'object') return ads
+  const record = value as Record<string, unknown>
+  ads.enabled = Boolean(record.enabled)
+  for (const slot of AD_SLOT_NAMES) {
+    const text = record[slot]
+    ads[slot] = typeof text === 'string' ? text : ''
+  }
+  return ads
+}
+
+export async function fetchSiteSettings(): Promise<SiteSettings | null> {
+  if (!FEED_BASE) return { mode: 'public', redirectUrl: '', ads: { ...EMPTY_ADS } }
   try {
     const response = await fetch(`${FEED_BASE}/api/settings`, { cache: 'no-store' })
     if (!response.ok) return null
-    const data = (await response.json()) as { mode?: string }
+    const data = (await response.json()) as {
+      mode?: string
+      redirectUrl?: unknown
+      ads?: unknown
+    }
     if (data.mode !== 'direct' && data.mode !== 'public') return null
     try {
       window.sessionStorage.setItem(CACHE_KEY, data.mode)
     } catch {
       /* storage blocked — the in-memory value is still correct */
     }
-    return data.mode
+    return {
+      mode: data.mode,
+      redirectUrl: typeof data.redirectUrl === 'string' ? data.redirectUrl : '',
+      ads: normaliseAds(data.ads),
+    }
   } catch {
     return null
   }
+}
+
+/** Kept for callers that only care about the mode. */
+export async function fetchSiteMode(): Promise<SiteMode | null> {
+  return (await fetchSiteSettings())?.mode ?? null
 }
 
 interface SettingsValue {
   /** null while the first request is in flight. */
   mode: SiteMode | null
   isDirect: boolean
+  redirectUrl: string
+  ads: AdConfig
   refresh: () => Promise<void>
 }
 
@@ -70,11 +127,19 @@ const SettingsContext = createContext<SettingsValue | null>(null)
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<SiteMode | null>(() => cachedMode())
+  const [redirectUrl, setRedirectUrl] = useState('')
+  const [ads, setAds] = useState<AdConfig>(() => ({ ...EMPTY_ADS }))
 
   const refresh = useCallback(async () => {
-    const next = await fetchSiteMode()
-    if (next) setMode(next)
-    else setMode((current) => current ?? 'public')
+    const next = await fetchSiteSettings()
+    if (next) {
+      setMode(next.mode)
+      setRedirectUrl(next.redirectUrl)
+      setAds(next.ads)
+      return
+    }
+    // Unreachable Worker: keep the cached mode, never guess 'direct'.
+    setMode((current) => current ?? 'public')
   }, [])
 
   useEffect(() => {
@@ -92,8 +157,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const value = useMemo<SettingsValue>(
-    () => ({ mode, isDirect: mode === 'direct', refresh }),
-    [mode, refresh],
+    () => ({ mode, isDirect: mode === 'direct', redirectUrl, ads, refresh }),
+    [mode, redirectUrl, ads, refresh],
   )
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

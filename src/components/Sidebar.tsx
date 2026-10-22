@@ -20,6 +20,7 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react'
+import AdSlot from './AdSlot'
 import { ALL_CHANNEL_MAP, browsePath, channelPath } from '../data/seed'
 import { useStore } from '../lib/store'
 
@@ -160,6 +161,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         <hr className="mx-1 my-3 border-line" />
+
+        <AdSlot slot="sidebar" className="mx-1 my-3 rounded-xl" />
 
         <div className="flex h-10 items-center justify-between rounded-[10px] px-3">
           <Link
