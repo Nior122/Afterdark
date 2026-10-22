@@ -48,6 +48,37 @@ category and optional duration (`8:31` or seconds). Everything is stored in the 
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are
 tagged **Yours** and can be deleted from their card menu or the watch page.
 
+## Two site modes (one switch)
+
+The site ships with a runtime switch, stored in the Worker's KV so it needs no rebuild:
+
+| Mode | What visitors get |
+| --- | --- |
+| `public` (default) | The full catalogue: home feed, categories, search, related videos |
+| `direct` | Link-only: no home page, no menu, no related videos, no links between videos. Each video opens **only** from its own URL `/v/<id>/` |
+
+Switch it from the bot (`/mode`) or from the dashboard (`/admin/`) — see
+[docs/telegram-bot-setup.md](docs/telegram-bot-setup.md).
+
+### How search engines still index every video
+
+Discovery never depends on internal links, in either mode:
+
+- `sitemap.xml` lists **every** video page with `<lastmod>` = the date it was added. It is
+  generated at build time from the catalogue plus the bot feed, so it changes when videos are
+  added or removed.
+- `robots.txt` is `User-agent: *` / `Allow: /` / `Sitemap: …/sitemap.xml` — nothing is blocked, and
+  crawlers get exactly the same HTML visitors get (no cloaking).
+- Every `/v/<id>/` page is a real static file with its own `<title>`, meta description,
+  `<meta name="robots" content="index, follow">`, canonical URL, Open Graph + Twitter cards
+  (`summary_large_image`) and a schema.org `VideoObject` block (`name`, `description`,
+  `thumbnailUrl`, `uploadDate`, `contentUrl`/`embedUrl`, `duration`).
+- `/`, the 404 shell and `/admin/` are `noindex` — the catalogue's hash routes are not per-video
+  URLs, so indexable content lives at the video URLs only.
+
+New videos appear on their own URL immediately; they enter `sitemap.xml` after the next build,
+which the dashboard's **Rebuild site** button triggers.
+
 ## Telegram bot publishing (optional)
 
 Forward a video to a Telegram bot and it appears on the site for everyone — including videos
@@ -69,6 +100,8 @@ What the bot does:
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
 | Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
+| **Switch site mode** | `/mode` — public catalogue ⇄ direct links only, applied live |
+| **Admin dashboard** | `/admin/` does the same jobs in a web page: mode switch, rename, recategorise, delete, scrape, review/publish drafts, rebuild the site |
 
 Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
 and the site plays them through its usual shielded player. Telegram bots can only fetch files
@@ -111,7 +144,17 @@ src/
   lib/avatars.ts  generated uploader avatars (data-URI SVG, see below)
   lib/video.ts   URL parsing (YouTube/Vimeo/Telegram posts/direct files), view + duration formatting
   lib/hooks.ts   click-outside, escape, page title
-  pages/         one component per route
+  lib/settings.tsx site mode context (reads /api/settings, 5-minute refresh)
+  lib/admin.ts   typed client for the Worker's admin API (token in sessionStorage)
+  lib/site.ts    canonical site URL, deployment base path
+  lib/meta.ts    per-video <title>/description/Open Graph/VideoObject data
+  Root.tsx       path router for /v/<id>/ and /admin/, hash router + mode gate otherwise
+  pages/         one component per route (DirectVideoPage, AdminPage, NotFoundPage…)
+scripts/
+  prerender.mjs       static /v/<id>/ pages, sitemap.xml, robots.txt, 404 shell
+  verify.mjs          checks the built HTML against the indexing rules
+  verify:dom          mounts the app in jsdom (needs `npm i --no-save jsdom`)
+worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, mode
 ```
 
 ## Notes
@@ -189,14 +232,22 @@ src/
 | Script | Purpose |
 | --- | --- |
 | `npm run dev` | Vite dev server on `0.0.0.0:5173` |
-| `npm run build` | `tsc -b` type-check, then production build |
+| `npm run build` | `tsc -b` type-check, production build, then prerender pages/sitemap/robots |
 | `npm run preview` | Preview the production build |
+| `npm run preview:static` | Serve `dist/` the way Pages does (directory URLs, 404 shell) |
+| `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
+| `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
+| `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
+| `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 
 ## Deployment
 
-The app is a static single-page build — `npm run build` emits `dist/` with no server requirements.
-Routing uses a **HashRouter** (`/#/watch/…`) so the build works on any static host, including GitHub
-Pages sub-paths, with zero rewrite configuration.
+The app is a static build — `npm run build` emits `dist/` with no server requirements. The
+catalogue uses a **HashRouter** (`/#/watch/…`) so it works from any path, while the indexable
+pages are real files: `dist/v/<id>/index.html` per video, `dist/admin/index.html`, `404.html`,
+`sitemap.xml` and `robots.txt`. Set `VITE_SITE_URL` (repo variable for Pages) to the public origin
+so canonical/OG URLs and the sitemap are absolute; it falls back to
+`https://nior122.github.io/Afterdark`.
 
 ### GitHub Pages (included workflow)
 

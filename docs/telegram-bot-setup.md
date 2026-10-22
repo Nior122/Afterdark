@@ -56,8 +56,19 @@ In your Worker → **Settings → Variables and Secrets → Add**, create two
 | --- | --- |
 | `BOT_TOKEN` | The token from BotFather (Step 1) |
 | `WEBHOOK_SECRET` | A long random string you invent (24+ characters, letters/digits) — you'll reuse it in Step 5 |
+| `ADMIN_TOKEN` | *(optional but recommended)* a long random password for the `/admin` dashboard. Without it the dashboard is disabled and only the bot can manage videos |
 
 Click **Deploy** after adding them.
+
+Optional, for the dashboard's **Rebuild site** button (needed to put new videos
+into `sitemap.xml` without touching GitHub):
+
+| Name | Value |
+| --- | --- |
+| `GITHUB_TOKEN` | A fine-grained PAT with **Actions: read and write** on this repo |
+| `GITHUB_REPO` | `Nior122/Afterdark` |
+| `GITHUB_WORKFLOW` | `deploy.yml` (default) |
+| `GITHUB_BRANCH` | `main` (default) |
 
 ## Step 5 — Point Telegram at your Worker
 
@@ -135,26 +146,62 @@ happens the bot says so and suggests the alternative: paste the direct
 embed/player link (e.g. `…/embed/abc123/`), forward the file, or share a
 public `t.me` post.
 
+### Choose how the site looks: `/mode`
+
+One switch, two personalities. It is stored in the Worker's KV and the site
+reads it live, so **switching needs no rebuild**.
+
+| Mode | What visitors get |
+| --- | --- |
+| **Public catalogue** (default) | Home feed, categories, search, related videos — the normal tube |
+| **Direct links only** | No home page, no menus, no related videos. Each video opens only from its own link (`/v/<id>/`). Google/Bing find the pages through `sitemap.xml`, which lists every video with its `<lastmod>` date; `robots.txt` allows all crawlers and points at it. Video pages keep their unique title/description, Open Graph/Twitter tags and `VideoObject` JSON-LD |
+
+`/mode` shows the current mode with a check mark and two buttons — tap the one
+you want. Both modes keep every link working.
+
 ### Manage what is published
 
 | Command / button | What it does |
 | --- | --- |
-| `/videos` (or `/list`) | Every video the bot published, with ids, categories, durations and page buttons |
+| `/videos` (or `/list`) | Every video the bot published, paged 5 at a time, with ids, categories and durations |
 | **✏️ Rename n** | Ask for a new title and save it |
 | **🗑 Delete n** | Asks for confirmation, then unpublishes |
 | `/rename <id> <new title>` | Rename in one message |
 | `/remove <id>` | Unpublish straight away |
+| `/mode` | Switch between public catalogue and direct links only |
 | `/pending` | Drafts still waiting for review |
 | `/cancel` | Abort a pending “send me the new title” step |
 | `/id` | Show your Telegram user ID (useful below) |
 
-The list is paged 5 at a time, so it works with hundreds of videos. Renames and
-deletions reach the website within about a minute (the feed is cached for 60 s).
+Renames and deletions reach the website within about a minute (the feed is
+cached for 60 s).
 
 **Note:** the bot can only manage videos it published (Telegram files and
 scraped links). The catalogue videos hard-coded in the website's
 `src/data/seed.ts` are part of the site build, not the feed, so they are not
 editable from Telegram.
+
+## The admin dashboard
+
+Everything the bot does, in a web page: **`https://YOURDOMAIN/admin/`**
+
+1. Set the `ADMIN_TOKEN` secret on the Worker (Step 4) and deploy.
+2. Open `/admin/` on your site and enter that token. It is kept in the browser
+   tab only (sessionStorage) — never in the site's JavaScript or in a URL.
+3. You get:
+   - **Site mode** — the same on/off switch as `/mode`, with a note when a
+     rebuild is needed.
+   - **Videos** — every video the bot published: rename inline, change the
+     category from a dropdown, delete (with a confirm step), open the source.
+   - **Add from link** — paste a URL, scrape it, and land in Drafts.
+   - **Drafts** — edit the title/category, publish one, publish all, or discard.
+     Nothing is public until you publish.
+   - **Rebuild site** — triggers the deploy workflow (needs `GITHUB_TOKEN` +
+     `GITHUB_REPO`). Use it after adding videos so their pages and the sitemap
+     are regenerated.
+
+The dashboard is `noindex` and is not linked from any video page, so it stays
+out of search results.
 
 ## Optional: auto-post everything from your own channel
 
@@ -178,6 +225,9 @@ to appear on the site automatically:
 | "I could not read that page" | The site blocked the Worker (403/Cloudflare challenge/JS-only). Paste the direct embed link, forward the file, or use a public `t.me` post. |
 | Scraped video has the wrong title | Press ✏️ Edit title on the draft card before publishing, or /rename the id afterwards. |
 | Wrong category | 🏷 Category on the draft card; re-infer it from the page's keywords if they were unclear. |
+| Dashboard says "admin-disabled" | Set the `ADMIN_TOKEN` secret on the Worker and redeploy. |
+| New video isn't in sitemap.xml yet | The sitemap is generated at build time. Press **Rebuild site** in the dashboard (or re-run the deploy workflow) after publishing. Direct links work immediately either way. |
+| Mode switch seems ignored | Confirm `VITE_TELEGRAM_FEED_URL` is set for the **site** build and the site was redeployed after setting it — without it the site has no Worker to ask and stays in public mode. |
 | "⚠️ … up to 20 MB" | The video is too big for Telegram bots. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or publish that one via a public `t.me` link instead. |
 | Token leaked | In @BotFather send `/revoke`, put the new token in the `BOT_TOKEN` secret, repeat Step 5. Old file links keep working via the Worker. |
 

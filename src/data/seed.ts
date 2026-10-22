@@ -16,7 +16,10 @@ export interface Video {
   thumbnail: string
   duration: string
   views: string
+  /** Display-only relative age ("2 months ago"), also shown on cards. */
   publishedAt: string
+  /** ISO date (YYYY-MM-DD) the video was added — sitemap <lastmod>, schema uploadDate. */
+  addedAt?: string
   channelId: string
   category: string
   /** Raw URL supplied by the user. Empty for seeded/demo videos. */
@@ -349,6 +352,8 @@ export const SEED_VIDEOS: Video[] = [
     duration: '0:54',
     views: '686 views',
     publishedAt: '2 months ago',
+    // Date added — sitemap <lastmod> and schema.org uploadDate.
+    addedAt: '2026-08-22',
     channelId: '',
     category: 'Homemade',
     videoUrl: 'https://t.me/leakedvideospage/2269',
@@ -363,6 +368,8 @@ export const SEED_VIDEOS: Video[] = [
     duration: '30:10',
     views: '31.9K views',
     publishedAt: '2 months ago',
+    // Date added — sitemap <lastmod> and schema.org uploadDate.
+    addedAt: '2026-08-22',
     channelId: 'pov-central',
     category: 'POV',
     videoUrl: 'https://www.eporner.com/embed/f2gVZh1XTVr/',
@@ -398,6 +405,8 @@ export const SEED_VIDEOS: Video[] = [
     duration: '19:33',
     views: '443K views',
     publishedAt: '7 months ago',
+    // Date added — sitemap <lastmod> and schema.org uploadDate.
+    addedAt: '2026-03-22',
     channelId: 'pov-central',
     category: 'POV',
     videoUrl: 'https://www.eporner.com/embed/7ds0OE7OiYv/',
@@ -436,6 +445,8 @@ export const SEED_VIDEOS: Video[] = [
     duration: '30:59',
     views: '7.5K views',
     publishedAt: '5 days ago',
+    // Date added — sitemap <lastmod> and schema.org uploadDate.
+    addedAt: '2026-10-17',
     channelId: 'pov-central',
     category: 'POV',
     videoUrl: 'https://www.eporner.com/embed/xnMiRJxFbXE/',

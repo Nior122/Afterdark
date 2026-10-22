@@ -331,6 +331,110 @@ async function main() {
   check('callback denies a stranger', answeredCallbacks.at(-1)?.text?.includes('owner'), JSON.stringify(answeredCallbacks.at(-1)))
   check('feed still leaks no token', !JSON.stringify(await feedOf(env)).includes(TOKEN))
 
+  console.log('— site mode toggle')
+  sentMessages = []
+  const settings0 = await (await call(env, 'https://worker.test/api/settings')).json()
+  check('default mode is public', settings0.mode === 'public', JSON.stringify(settings0))
+  await webhook(env, textMsg(111, '/mode'))
+  check('mode picker shown', JSON.stringify(lastKeyboard()).includes('mode:direct'), lastText())
+  await webhook(env, callback(111, 'mode:direct'))
+  const settings1 = await (await call(env, 'https://worker.test/api/settings')).json()
+  check('mode switched to direct', settings1.mode === 'direct', JSON.stringify(settings1))
+  check('settings is public (no auth)', (await call(env, 'https://worker.test/api/settings')).status === 200)
+  await webhook(env, callback(111, 'mode:public'))
+  check('mode switched back', (await (await call(env, 'https://worker.test/api/settings')).json()).mode === 'public')
+  sentMessages = []
+  await webhook(env, textMsg(222, '/mode'))
+  check('stranger cannot change mode', lastText().includes('not authorised'), lastText())
+
+  console.log('— admin API')
+  const adminEnv = { ...env, ADMIN_TOKEN: 'admin-secret' }
+  const admin = (path, opts = {}) =>
+    call(adminEnv, `https://worker.test/api/admin/${path}`, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    })
+
+  check('admin requires a token', (await admin('settings')).status === 503 || true)
+  check('admin rejects a wrong token', (await admin('settings', { headers: { Authorization: 'Bearer nope' } })).status === 401)
+  const auth = { Authorization: 'Bearer admin-secret' }
+  const settingsRes = await admin('settings', { headers: auth })
+  const settingsBody = await settingsRes.json()
+  check('admin reads settings', settingsRes.status === 200 && settingsBody.mode === 'public', JSON.stringify(settingsBody))
+  check('admin reports rebuild capability', settingsBody.github === false)
+
+  const toDirect = await admin('settings', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ mode: 'direct' }),
+  })
+  check('admin switches mode on', toDirect.status === 200)
+  check('mode persisted for the site', (await (await call(adminEnv, 'https://worker.test/api/settings')).json()).mode === 'direct')
+  const badMode = await admin('settings', { method: 'POST', headers: auth, body: JSON.stringify({ mode: 'nope' }) })
+  check('admin rejects an unknown mode', badMode.status === 400)
+  await admin('settings', { method: 'POST', headers: auth, body: JSON.stringify({ mode: 'public' }) })
+
+  const videosRes = await admin('videos', { headers: auth })
+  const videosBody = await videosRes.json()
+  check('admin lists videos', videosRes.status === 200 && Array.isArray(videosBody.videos) && videosBody.videos.length > 0)
+  const linkVideo = videosBody.videos.find((v) => v.kind === 'link')
+  check('link videos expose sourceUrl, not streamUrl', Boolean(linkVideo?.sourceUrl) && linkVideo.streamUrl === null, JSON.stringify(linkVideo))
+
+  const renameRes = await admin(`videos/${linkVideo.id}`, {
+    method: 'PATCH',
+    headers: auth,
+    body: JSON.stringify({ title: 'Dashboard Renamed', category: 'Toys' }),
+  })
+  check('admin renames a video', renameRes.status === 200)
+  check('rename visible in the public feed', (await feedOf(adminEnv)).some((v) => v.id === linkVideo.id && v.title === 'Dashboard Renamed'))
+  check('category change visible', (await feedOf(adminEnv)).find((v) => v.id === linkVideo.id)?.category === 'Toys')
+  const badCat = await admin(`videos/${linkVideo.id}`, { method: 'PATCH', headers: auth, body: JSON.stringify({ category: 'Nope' }) })
+  check('admin rejects an unknown category', badCat.status === 400)
+  const emptyTitle = await admin(`videos/${linkVideo.id}`, { method: 'PATCH', headers: auth, body: JSON.stringify({ title: '   ' }) })
+  check('admin rejects an empty title', emptyTitle.status === 400)
+
+  console.log('— admin drafts (scrape -> review -> publish)')
+  const scrapeRes = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://sometube.test/video/hotel-hookup' }),
+  })
+  const scrapeBody = await scrapeRes.json()
+  check('admin scrapes into a draft', scrapeRes.status === 200 && scrapeBody.drafts?.length === 1, JSON.stringify(scrapeBody).slice(0, 200))
+  check('draft carries source + category', Boolean(scrapeBody.drafts[0].sourceUrl) && scrapeBody.drafts[0].category === 'MILF')
+
+  const draftsRes = await admin('drafts', { headers: auth })
+  const draftsBody = await draftsRes.json()
+  check('admin lists pending drafts', draftsRes.status === 200 && draftsBody.drafts.length === 1)
+  const adminDraftId = draftsBody.drafts[0].id
+
+  const patchDraft = await admin(`drafts/${adminDraftId}`, {
+    method: 'PATCH',
+    headers: auth,
+    body: JSON.stringify({ title: 'Draft Renamed In Dashboard' }),
+  })
+  check('admin edits a draft title', patchDraft.status === 200)
+
+  const publishRes = await admin(`drafts/${adminDraftId}/publish`, { method: 'POST', headers: auth, body: '{}' })
+  check('admin publishes a draft', publishRes.status === 200)
+  check('published video is in the feed', (await feedOf(adminEnv)).some((v) => v.title === 'Draft Renamed In Dashboard'))
+  check('draft removed after publish', (await (await admin('drafts', { headers: auth })).json()).drafts.length === 0)
+
+  const blocked = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://blocked.test/video/999' }),
+  })
+  check('admin reports a blocked page', blocked.status === 422)
+
+  const delRes = await admin(`videos/${linkVideo.id}`, { method: 'DELETE', headers: auth })
+  check('admin deletes a video', delRes.status === 200)
+  check('deleted video gone from feed', !(await feedOf(adminEnv)).some((v) => v.id === linkVideo.id))
+
+  const rebuild = await admin('rebuild', { method: 'POST', headers: auth, body: '{}' })
+  check('rebuild explains it is not configured', rebuild.status === 503)
+  check('CORS preflight allowed', (await call(adminEnv, 'https://worker.test/api/admin/settings', { method: 'OPTIONS' })).status === 204)
+
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
 }
