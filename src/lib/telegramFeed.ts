@@ -10,9 +10,11 @@ import { timeAgo } from './video'
  * When `VITE_TELEGRAM_FEED_URL` points at the bot Worker (worker/worker.js,
  * see docs/telegram-bot-setup.md), videos the owner forwards to the bot are
  * fetched from its public `/api/videos` feed and merged into the catalogue.
- * Playback streams through the Worker's proxy (`.../stream.mp4`, which the
- * URL resolver treats as a native file), so the bot token and raw Telegram
- * file links never reach the browser. With the variable unset (default),
+ * Telegram-file videos stream through the Worker's proxy (`.../stream.mp4`,
+ * which the URL resolver treats as a native file), so the bot token and raw
+ * Telegram file links never reach the browser. Videos the owner scraped from a
+ * web page come with their own `sourceUrl` (an embed/player or page link) and
+ * are link-only, like the seeded catalogue. With the variable unset (default),
  * this resolves to an empty list and the site behaves exactly as before.
  */
 
@@ -23,8 +25,13 @@ interface FeedVideo {
   tags?: string[]
   durationSec?: number
   createdAt?: number
+  /** Telegram-file videos stream through the Worker proxy. */
   streamUrl?: string
+  /** Scraped/link videos play from their original source instead. */
+  sourceUrl?: string
   thumbUrl?: string | null
+  description?: string
+  site?: string
 }
 
 const FEED_BASE = (import.meta.env.VITE_TELEGRAM_FEED_URL as string | undefined)?.replace(
@@ -42,7 +49,8 @@ function formatDurationSec(totalSec?: number): string {
     : `${m}:${String(sec).padStart(2, '0')}`
 }
 
-function mapFeedVideo(v: FeedVideo): Video {
+/** Exported for the feed-contract check in scripts/feed-check.mjs. */
+export function mapFeedVideo(v: FeedVideo): Video {
   const declaredCategory =
     v.category && v.category !== 'All' && (CATEGORIES as readonly string[]).includes(v.category)
       ? v.category
@@ -54,6 +62,11 @@ function mapFeedVideo(v: FeedVideo): Video {
   const category =
     declaredCategory ??
     channelForVideo({ id: v.id, channelId: '', category: '' }).category
+  // Scraped videos carry their own description; only fill in the generic line
+  // when the source had nothing to say.
+  const description =
+    v.description?.trim() ||
+    `${category} · ${duration}.${v.site ? ` Source: ${v.site}.` : ''}`
   return {
     id: v.id,
     title: v.title?.trim() || 'Telegram video',
@@ -63,9 +76,12 @@ function mapFeedVideo(v: FeedVideo): Video {
     publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
     channelId: '',
     category,
-    videoUrl: v.streamUrl,
-    description: `${category} · ${duration}.`,
+    videoUrl: v.streamUrl || v.sourceUrl,
+    description,
     tags: v.tags?.length ? v.tags : [category, 'Telegram'],
+    // Link videos are third-party pages/players: keep them click-shielded so a
+    // viewer cannot be navigated off the site by the embedded player.
+    protectedEmbed: Boolean(v.sourceUrl),
   }
 }
 
@@ -76,7 +92,7 @@ export async function fetchTelegramFeed(): Promise<Video[]> {
     if (!response.ok) return []
     const data = (await response.json()) as { videos?: FeedVideo[] }
     if (!Array.isArray(data.videos)) return []
-    return data.videos.filter((v) => v?.id && v.streamUrl).map(mapFeedVideo)
+    return data.videos.filter((v) => v?.id && (v.streamUrl || v.sourceUrl)).map(mapFeedVideo)
   } catch {
     return []
   }

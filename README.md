@@ -56,11 +56,25 @@ from private chats/channels that the public embed cannot reach. A tiny Cloudflar
 a JSON feed at `/api/videos`, and proxies playback/thumbnails so the bot token never reaches
 the browser. The site merges that feed into the catalogue when the build-time variable
 `VITE_TELEGRAM_FEED_URL` is set (GitHub repo variable for Pages deploys, or `.env.local` —
-see `.env.example`); unset, the site is unchanged. Bot commands: send a video to publish
-(caption = title, `#Hashtags` = tags/category), `/list`, `/remove <id>`. One-time setup
-(~10 minutes, all free) is documented step-by-step in
-[docs/telegram-bot-setup.md](docs/telegram-bot-setup.md). Telegram bots can only fetch files
-up to 20 MB, so larger videos still go through public `t.me` links.
+see `.env.example`); unset, the site is unchanged. One-time setup (~10 minutes, all free) is
+documented step-by-step in [docs/telegram-bot-setup.md](docs/telegram-bot-setup.md).
+
+What the bot does:
+
+| Feature | How |
+| --- | --- |
+| Publish a forwarded video | Caption line 1 = title, `#Hashtags` = tags/category; published immediately |
+| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24) |
+| **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
+| **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
+| **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
+| Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
+
+Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
+and the site plays them through its usual shielded player. Telegram bots can only fetch files
+up to 20 MB, so larger files still go through public `t.me` links or a scraped embed URL.
+Note that some sites block server-side requests (403 / JavaScript challenge); the bot reports
+that and suggests pasting the direct embed link instead.
 
 ## Screens
 
