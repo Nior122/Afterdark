@@ -33,8 +33,13 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # Public origin the site is served from (no trailing slash), e.g.
+          # https://nior122.github.io/Faceverify — used for canonical URLs,
+          # Open Graph tags, sitemap.xml and robots.txt.
+          VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
           # Optional public URL of the Telegram bot worker; set as a repo
-          # variable to enable the bot feed (docs/telegram-bot-setup.md).
+          # variable to enable the bot feed and to prerender bot videos
+          # (docs/telegram-bot-setup.md).
           VITE_TELEGRAM_FEED_URL: ${{ vars.VITE_TELEGRAM_FEED_URL }}
 
       - name: Upload artifact

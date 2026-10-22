@@ -5,10 +5,11 @@
 [build.environment]
   NODE_VERSION = "20"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# No SPA catch-all rewrite: every video page is prerendered as
+# v/<id>/index.html, and unknown paths fall through to Netlify's
+# automatic 404.html handling (dist/404.html), which keeps "/" out of
+# search results. Set VITE_SITE_URL (and optionally
+# VITE_TELEGRAM_FEED_URL) in Site settings → Environment variables.
 
 [[headers]]
   for = "/assets/*"
