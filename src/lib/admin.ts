@@ -1,4 +1,4 @@
-import { AD_SLOT_NAMES, EMPTY_ADS, FEED_ORIGIN, type AdConfig, type SiteMode } from './settings'
+import { AD_SLOT_NAMES, EMPTY_ADS, FEED_ORIGIN, normaliseAds, type AdConfig, type SiteMode } from './settings'
 
 /**
  * Client for the Worker's admin API (worker/worker.js).
@@ -166,30 +166,63 @@ function chunk<T>(items: T[], size = 200): T[][] {
   return out
 }
 
+/**
+ * A Worker deployed before the site was last rebuilt answers
+ * `/api/admin/settings` with fewer fields than the current UI reads (no
+ * `ads`/`slots` before the ad feature, no `adsUpdatedAt`…). The dashboard
+ * used to trust those shapes and crash on `settings.ads.enabled` — the
+ * ErrorBoundary then replaced the whole dashboard with an error card that
+ * looked like the admin page itself was broken. Normalising every
+ * settings-shaped reply once, here, keeps the UI readable against any Worker
+ * version; the owner just sees defaults until they redeploy the Worker.
+ */
+function normaliseSettings(raw: unknown): AdminSettings {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Partial<AdminSettings>
+  return {
+    mode: source.mode === 'direct' ? 'direct' : 'public',
+    modes: Array.isArray(source.modes) && source.modes.length ? source.modes : ['public', 'direct'],
+    redirectUrl: typeof source.redirectUrl === 'string' ? source.redirectUrl : '',
+    ads: normaliseAds(source.ads),
+    slots: Array.isArray(source.slots) && source.slots.length ? source.slots : [...AD_SLOT_NAMES],
+    updatedAt: Number(source.updatedAt) || null,
+    adsUpdatedAt: Number(source.adsUpdatedAt) || null,
+    github: Boolean(source.github),
+    feedUrl: typeof source.feedUrl === 'string' ? source.feedUrl : '',
+  }
+}
+
 export const admin = {
-  settings: () => request<AdminSettings>('settings'),
-  setMode: (mode: SiteMode) =>
-    request<{ ok: true } & AdminSettings>('settings', {
+  settings: async () => normaliseSettings(await request<Partial<AdminSettings>>('settings')),
+  setMode: async (mode: SiteMode) => ({
+    ok: true as const,
+    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
       method: 'POST',
       body: JSON.stringify({ mode }),
-    }),
+    })),
+  }),
   /** Empty string turns the home-page redirect off. */
-  setRedirect: (redirectUrl: string) =>
-    request<{ ok: true } & AdminSettings>('settings', {
+  setRedirect: async (redirectUrl: string) => ({
+    ok: true as const,
+    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
       method: 'POST',
       body: JSON.stringify({ redirectUrl }),
-    }),
+    })),
+  }),
   /** Partial ad update: send only the slots that changed, plus `enabled`. */
-  setAds: (ads: Partial<AdConfig>) =>
-    request<{ ok: true } & AdminSettings>('settings', {
+  setAds: async (ads: Partial<AdConfig>) => ({
+    ok: true as const,
+    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
       method: 'POST',
       body: JSON.stringify({ ads }),
-    }),
-  clearAds: (enabled = false) =>
-    request<{ ok: true } & AdminSettings>('ads/clear', {
+    })),
+  }),
+  clearAds: async (enabled = false) => ({
+    ok: true as const,
+    ...normaliseSettings(await request<Partial<AdminSettings>>('ads/clear', {
       method: 'POST',
       body: JSON.stringify({ enabled }),
-    }),
+    })),
+  }),
   videos: async () => {
     const raw = await request<{ videos: AdminVideo[]; total: number; viewsTotal?: number }>('videos')
     // Normalise so the table can sort/read `views` even against a Worker
@@ -236,7 +269,12 @@ export const admin = {
     }
     return { ok: true as const, updated, missing }
   },
-  drafts: () => request<{ drafts: AdminDraft[] }>('drafts'),
+  drafts: async () => {
+    // Same version tolerance as settings: a malformed/absent list renders as
+    // empty rather than taking the dashboard down.
+    const raw = await request<{ drafts?: AdminDraft[] }>('drafts')
+    return { drafts: Array.isArray(raw.drafts) ? raw.drafts : [] }
+  },
   scrape: (url: string) =>
     request<{
       ok: true

@@ -222,6 +222,44 @@ const scenarios = [
     ],
   },
   {
+    name: 'signed-in dashboard survives a Worker from before the ads fields',
+    path: '/admin/',
+    accepted: true,
+    session: { 'afterdark.admin.v1': 'probe-admin-token' },
+    fetch: onlyWorker((url) => {
+      // The pre-ads Worker shape: no `ads`, no `slots`, no `total`/`views`,
+      // no `adsUpdatedAt`. The client normalises it — it must not crash the
+      // ErrorBoundary over the dashboard (that crash read as "admin is
+      // redirecting to an error page" from the owner's side).
+      if (url.endsWith('/api/admin/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          mode: 'public', modes: ['public', 'direct'], redirectUrl: '',
+          updatedAt: null, github: false, feedUrl: origin,
+        }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'w-oldfixture', title: 'Old Worker Fixture', category: 'POV', tags: [],
+            durationSec: 60, kind: 'link', sourceUrl: 'https://source.test/v1', thumbUrl: null,
+            streamUrl: null, description: '', site: 'source.test', createdAt: Date.now(), updatedAt: null,
+          }],
+        }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/drafts')) return Promise.resolve(new Response(JSON.stringify({ drafts: [] }), { status: 200 }))
+      if (url.endsWith('/api/settings')) return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '' }), { status: 200 }))
+      if (url.endsWith('/api/videos')) return Promise.resolve(new Response(JSON.stringify({ videos: [] }), { status: 200 }))
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    expect: (text) =>
+      !/Something went wrong/i.test(text) &&
+      /Old Worker Fixture/.test(text) &&
+      /Ads/i.test(text),
+    probes: (window) => [
+      ['videos total falls back to the list length', !/views total/i.test(window.document.body.textContent || '') || /0 views total/.test(window.document.body.textContent || '')],
+    ],
+  },
+  {
     name: 'ad slots render the owner code',
     path: '/',
     fetch: okWorker('public', { ads: adsFixture }),
