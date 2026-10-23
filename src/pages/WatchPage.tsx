@@ -23,7 +23,22 @@ import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 import { reportVideoView } from '../lib/views'
+import { FEED_ORIGIN } from '../lib/settings'
 import { formatCount, resolveSource } from '../lib/video'
+
+/**
+ * The Worker's own stream endpoint is infrastructure, not content: showing it
+ * under the player would put the owner's Worker URL on every bot-uploaded
+ * video page. The source chip is only for genuinely external sources.
+ */
+function isOwnFeedUrl(url?: string): boolean {
+  if (!url || !FEED_ORIGIN) return false
+  try {
+    return new URL(url).host === new URL(FEED_ORIGIN).host
+  } catch {
+    return false
+  }
+}
 
 function hashString(value: string) {
   let hash = 0
@@ -361,7 +376,7 @@ export default function WatchPage() {
             </div>
           )}
 
-          {video.videoUrl && !video.protectedEmbed && source.kind !== 'telegram' && (
+          {video.videoUrl && !video.protectedEmbed && source.kind !== 'telegram' && !isOwnFeedUrl(video.videoUrl) && (
             <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-muted">
               <Link2 size={14} className="text-brand-600" />
               <span className="max-w-full truncate">{video.videoUrl}</span>
