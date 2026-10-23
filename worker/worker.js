@@ -1538,10 +1538,30 @@ function scrapePage(html, pageUrl) {
  * Shared by the bot and the admin dashboard: returns data, sends nothing.
  * -> { error } | { drafts, site, pageTitle }
  */
+/** t.me/c/<id>/… (member-only), /+invite-hash and legacy /joinchat/ links. */
+const PRIVATE_TELEGRAM_LINK = /^https?:\/\/(?:www\.)?(?:t\.me|telegram\.dog)\/(?:c\/\d+|joinchat\/|\+)/i
+
 async function createDraftsFromUrl(env, rawUrl) {
   const url = String(rawUrl || '').trim()
   if (!/^https?:\/\//i.test(url)) {
     return { error: 'That does not look like a link. It should start with http:// or https://' }
+  }
+
+  // Private Telegram targets can never be scraped: t.me/c/<id>/… pages open
+  // only for channel members, and invite links are not pages at all. Refusing
+  // them before any outbound request turns a multi-second hang (older
+  // Workers had no fetch deadline here at all) into an instruction that works.
+  if (PRIVATE_TELEGRAM_LINK.test(url)) {
+    return {
+      error:
+        'That is a private Telegram link, and neither the bot nor the dashboard can read one — ' +
+        't.me/c/… pages open only for members of the channel. To still get the video in: ' +
+        '(1) make the channel public (Channel Settings → Channel Type → Public), then RE-COPY ' +
+        'the post link — it should now read https://t.me/<name>/<id>; old /c/ links stay ' +
+        'member-only even after the channel goes public, or (2) paste a direct link to the ' +
+        'file/embed page. Videos over 20 MB always go in via a link — the file then never ' +
+        'passes through the bot.',
+    }
   }
 
   const page = await fetchPage(url)

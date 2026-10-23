@@ -429,6 +429,29 @@ async function main() {
   check('re-scrape returns no drafts', rescan.status === 200 && rescanBody.drafts.length === 0, JSON.stringify(rescanBody))
   check('re-scrape reports the duplicate', rescanBody.duplicates === 1, JSON.stringify(rescanBody))
 
+  // Private Telegram links must be refused on the spot — the point is to never
+  // attempt an outbound fetch for them (that is what used to hang the panel).
+  const privRes = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://t.me/c/1234567890/42' }),
+  })
+  const privBody = await privRes.json()
+  check('private t.me/c link rejected with guidance', privRes.status === 422 && /private Telegram link/i.test(privBody.message), JSON.stringify(privBody).slice(0, 160))
+  check('private rejection names the re-copy fix', /RE-COPY|re-copy/i.test(privBody.message))
+  const inviteRes = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://t.me/+AbCdEf1234567890' }),
+  })
+  check('invite-hash links rejected the same way', inviteRes.status === 422 && /private Telegram link/i.test((await inviteRes.json()).message))
+  const joinRes = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://t.me/joinchat/AAAAAE-legacy' }),
+  })
+  check('legacy joinchat links rejected too', joinRes.status === 422 && /private Telegram link/i.test((await joinRes.json()).message))
+
   const draftsRes = await admin('drafts', { headers: auth })
   const draftsBody = await draftsRes.json()
   check('admin lists pending drafts', draftsRes.status === 200 && draftsBody.drafts.length === 1)

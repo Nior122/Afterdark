@@ -176,8 +176,24 @@ function chunk<T>(items: T[], size = 200): T[][] {
  * settings-shaped reply once, here, keeps the UI readable against any Worker
  * version; the owner just sees defaults until they redeploy the Worker.
  */
+/** Settings fields added after the Worker API first shipped, oldest last. */
+const SETTINGS_VERSION_FIELDS = ['redirectUrl', 'ads', 'slots', 'adsUpdatedAt'] as const
+
+/**
+ * Which of those fields the most recent settings reply was missing. A non-empty
+ * list means the deployed Worker predates this dashboard: the banner warns the
+ * owner up front, and saveSettings() refuses to pretend a toggle persisted.
+ * Recomputed on every settings read.
+ */
+let missingWorkerFields: string[] = []
+
+export function workerMissingFields(): readonly string[] {
+  return missingWorkerFields
+}
+
 function normaliseSettings(raw: unknown): AdminSettings {
   const source = (raw && typeof raw === 'object' ? raw : {}) as Partial<AdminSettings>
+  missingWorkerFields = SETTINGS_VERSION_FIELDS.filter((field) => !(field in source))
   return {
     mode: source.mode === 'direct' ? 'direct' : 'public',
     modes: Array.isArray(source.modes) && source.modes.length ? source.modes : ['public', 'direct'],
@@ -191,31 +207,54 @@ function normaliseSettings(raw: unknown): AdminSettings {
   }
 }
 
+/**
+ * POST a settings patch, then read the settings back and confirm the Worker
+ * actually persisted it. An older Worker happily answers a POST while ignoring
+ * fields it has never heard of (ads, redirect…), so the toggle would flip back
+ * a refresh later and the owner reads that as the site ignoring the dashboard.
+ * A save that did not stick must look like a failed save.
+ */
+async function saveSettings(
+  body: Record<string, unknown>,
+  verify: (settings: AdminSettings) => boolean,
+  what: string,
+): Promise<{ ok: true } & AdminSettings> {
+  const posted = normaliseSettings(await request<Partial<AdminSettings>>('settings', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }))
+  if (verify(posted)) return { ok: true as const, ...posted }
+  // The POST echo did not acknowledge the change. Give the Worker one fresh
+  // read (KV can lag across regions for a moment) — and only call it a failed
+  // save when that disagrees too. An old Worker that never knew the field in
+  // the first place fails both checks and reports honestly.
+  let fresh: AdminSettings | null = null
+  try {
+    fresh = normaliseSettings(await request<Partial<AdminSettings>>('settings'))
+  } catch {
+    fresh = null
+  }
+  if (fresh && verify(fresh)) return { ok: true as const, ...fresh }
+  throw new AdminError(
+    `The Worker did not save the ${what}: it answered, but its reply still holds the old value. ` +
+      'This Worker build predates that control — redeploy worker/worker.js (run `wrangler deploy` ' +
+      'in the worker/ directory). The bot commands (/mode, /redirect) keep working meanwhile.',
+    0,
+  )
+}
+
 export const admin = {
   settings: async () => normaliseSettings(await request<Partial<AdminSettings>>('settings')),
-  setMode: async (mode: SiteMode) => ({
-    ok: true as const,
-    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
-      method: 'POST',
-      body: JSON.stringify({ mode }),
-    })),
-  }),
+  setMode: (mode: SiteMode) => saveSettings({ mode }, (s) => s.mode === mode, 'site mode'),
   /** Empty string turns the home-page redirect off. */
-  setRedirect: async (redirectUrl: string) => ({
-    ok: true as const,
-    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
-      method: 'POST',
-      body: JSON.stringify({ redirectUrl }),
-    })),
-  }),
+  setRedirect: (redirectUrl: string) =>
+    saveSettings({ redirectUrl }, (s) => s.redirectUrl === redirectUrl.trim(), 'home-page redirect'),
   /** Partial ad update: send only the slots that changed, plus `enabled`. */
-  setAds: async (ads: Partial<AdConfig>) => ({
-    ok: true as const,
-    ...normaliseSettings(await request<Partial<AdminSettings>>('settings', {
-      method: 'POST',
-      body: JSON.stringify({ ads }),
-    })),
-  }),
+  setAds: (ads: Partial<AdConfig>) =>
+    saveSettings({ ads }, (s) => {
+      const record = s.ads as unknown as Record<string, unknown>
+      return Object.entries(ads).every(([key, value]) => JSON.stringify(record[key]) === JSON.stringify(value))
+    }, 'ad settings'),
   clearAds: async (enabled = false) => ({
     ok: true as const,
     ...normaliseSettings(await request<Partial<AdminSettings>>('ads/clear', {
