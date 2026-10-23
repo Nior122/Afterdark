@@ -81,12 +81,21 @@ export default function DirectVideoPage() {
             src={source.src}
             title={video.title}
             poster={poster}
+            duration={video.duration}
             protectedEmbed={Boolean(video.protectedEmbed)}
+            isPortrait={video.isPortrait}
           />
         )}
 
         {isTelegram && (
-          <TelegramPlayer key={video.id} src={source.src} title={video.title} poster={poster} />
+          <TelegramPlayer
+            key={video.id}
+            src={source.src}
+            title={video.title}
+            poster={poster}
+            duration={video.duration}
+            isPortrait={video.isPortrait}
+          />
         )}
 
         {source.kind === 'file' && (

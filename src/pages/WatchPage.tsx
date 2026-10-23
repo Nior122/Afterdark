@@ -182,6 +182,7 @@ export default function WatchPage() {
               poster={video.thumbnail}
               duration={video.duration}
               protectedEmbed={Boolean(video.protectedEmbed)}
+              isPortrait={video.isPortrait}
             />
           )}
 
@@ -191,6 +192,8 @@ export default function WatchPage() {
               src={source.src}
               title={video.title}
               poster={video.thumbnail}
+              duration={video.duration}
+              isPortrait={video.isPortrait}
             />
           )}
 

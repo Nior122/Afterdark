@@ -42,6 +42,12 @@ export interface Video {
   avatar?: string
   isAd?: boolean
   adHeadline?: string
+  /**
+   * The media is taller than wide (vertical phone clips). Cards then frame the
+   * thumbnail in portrait and the poster facades letterbox instead of cropping
+   * the scene down to a 16:9 band.
+   */
+  isPortrait?: boolean
 }
 
 export interface Ad extends Video {

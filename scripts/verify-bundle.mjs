@@ -116,6 +116,28 @@ const dashboardWorker = (mode) => onlyWorker((url, init) => {
   return Promise.resolve(new Response('{}', { status: 200 }))
 })
 
+/**
+ * A t.me-scraped upload as the Worker's public feed describes it after the
+ * widget-markup scrape: real 41:05 duration and 720x1280 (portrait) media.
+ */
+const verticalFeedVideo_ = {
+  id: 'tg-vertical',
+  title: 'Vertical Clip',
+  category: 'Homemade',
+  tags: ['Homemade'],
+  durationSec: 2465,
+  width: 720,
+  height: 1280,
+  createdAt: Date.now(),
+  updatedAt: null,
+  description: 'A caption from the channel.',
+  site: 't.me',
+  views: 0,
+  sourceUrl: 'https://t.me/testchannel/1343',
+  streamUrl: null,
+  thumbUrl: 'https://worker.test/api/videos/tg-vertical/thumb.jpg',
+}
+
 const scenarios = [
   {
     name: 'first visit (no localStorage) shows the age gate',
@@ -204,6 +226,55 @@ const scenarios = [
       /Bare Upload/.test(text) &&
       /Homemade · 0:09/.test(text) &&
       !/Source:/i.test(text),
+  },
+  {
+    name: 'portrait uploads keep their shape in the catalogue grid',
+    path: '/',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [verticalFeedVideo_] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Vertical Clip/.test(text) && /41:05/.test(text),
+    probes: (w) => {
+      const html = w.document.body.innerHTML
+      return [
+        ['portrait card frame', /aspect-\[9\/16\]/.test(html)],
+        ['masonry column grid', /columns-1/.test(html)],
+        [
+          'portrait poster letterboxes (object-contain, not cropped)',
+          (() => {
+            const img = Array.from(w.document.querySelectorAll('img')).find((el) =>
+              (el.getAttribute('src') || '').includes('tg-vertical/thumb'),
+            )
+            return Boolean(img && img.className.includes('object-contain'))
+          })(),
+        ],
+      ]
+    },
+  },
+  {
+    name: 'the Telegram player shows the clip timestamp before playback',
+    path: '#/watch/tg-vertical',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [verticalFeedVideo_] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) =>
+      /Vertical Clip/.test(text) &&
+      /41:05/.test(text) &&
+      /A caption from the channel\./.test(text),
   },
   {
     name: 'the watch page never prints the Worker’s own stream URL',

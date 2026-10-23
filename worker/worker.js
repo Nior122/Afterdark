@@ -1301,6 +1301,34 @@ function parseDurationToSeconds(value) {
   return 0
 }
 
+/** Public-channel post link: t.me/<name>/<id> (query junk tolerated). */
+const TELEGRAM_POST_URL =
+  /^https?:\/\/(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/[A-Za-z][A-Za-z0-9_]{4,31}\/\d+/i
+
+/**
+ * Telegram post pages carry no video metadata in og: tags. The widget instead
+ * overlays the duration on the media thumb (`tgme_widget_message_video_duration`)
+ * and encodes the media's aspect ratio as a padding-bottom percentage on the
+ * player box (height/width as %). Without this the scrape stored 0 seconds
+ * and no dimensions, so every Telegram card showed a "0:00" badge.
+ */
+function telegramPostMeta(html) {
+  const out = { durationSec: 0, width: 0, height: 0 }
+  const badge =
+    /tgme_widget_message_video_duration[^>]*>\s*(?:<b>)?\s*(\d{1,3}:\d{2}(?::\d{2})?)\s*</i.exec(html) ||
+    /tgme_widget_message_video[^>]*data-duration="(\d+(?:\.\d+)?)"/i.exec(html)
+  if (badge) out.durationSec = parseDurationToSeconds(badge[1])
+  const pad =
+    /tgme_widget_message_video(?:_player)?\b[^>]*style="[^"]*padding-bottom:\s*([\d.]+)\s*%/i.exec(html) ||
+    /style="[^"]*padding-bottom:\s*([\d.]+)\s*%[^"]*"[^>]*class="[^"]*tgme_widget_message_video/i.exec(html)
+  const pct = pad ? Number(pad[1]) : 0
+  if (pct >= 30 && pct <= 400) {
+    out.width = 400
+    out.height = Math.round((400 * pct) / 100)
+  }
+  return out
+}
+
 /** Playable source for a scraped item: direct file, or an embeddable player. */
 function pickSourceUrl(candidates) {
   for (const candidate of candidates) {
@@ -1406,6 +1434,10 @@ function scrapePage(html, pageUrl) {
       return ''
     }
   })()
+
+  // Telegram post pages: the widget markup is the only place duration and
+  // aspect live. Computed once, applied to every item after the passes below.
+  const tgMeta = TELEGRAM_POST_URL.test(pageUrl) ? telegramPostMeta(html) : null
 
   const items = []
   const seen = new Set()
@@ -1530,6 +1562,16 @@ function scrapePage(html, pageUrl) {
     })
   }
 
+  if (tgMeta) {
+    for (const item of items) {
+      if (!item.durationSec && tgMeta.durationSec) item.durationSec = tgMeta.durationSec
+      if (!item.width && tgMeta.width) {
+        item.width = tgMeta.width
+        item.height = tgMeta.height
+      }
+    }
+  }
+
   return { items: items.slice(0, MAX_BATCH_DRAFTS), site, pageTitle }
 }
 
@@ -1606,6 +1648,8 @@ async function createDraftsFromUrl(env, rawUrl) {
       thumbUrl: item.thumbnail || '',
       description: item.description || '',
       durationSec: item.durationSec || 0,
+      width: item.width || 0,
+      height: item.height || 0,
       category: item.category || DEFAULT_CATEGORY,
       tags: item.tags || [],
       site: item.site || '',
@@ -1804,6 +1848,8 @@ async function publishDraft(env, draft) {
     thumbUrl: draft.thumbUrl || '',
     description: draft.description || '',
     durationSec: draft.durationSec || 0,
+    width: draft.width || 0,
+    height: draft.height || 0,
     category: draft.category || DEFAULT_CATEGORY,
     tags: draft.tags?.length ? draft.tags : [draft.category || DEFAULT_CATEGORY],
     site: draft.site || '',

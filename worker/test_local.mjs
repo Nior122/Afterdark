@@ -38,6 +38,21 @@ const JSONLD_PAGE = `<!doctype html><html><head><title>POV Gallery</title>
  "contentUrl":"https://www.eporner.test/embed/AAA111/","duration":"PT12M5S","genre":"POV"}
 </script></head><body></body></html>`
 
+// A public t.me post page: no og:video tags at all — duration and aspect live
+// only in the widget markup (overlay badge + padding-bottom on the player).
+const TME_POST_PAGE = `<!doctype html><html><head>
+<meta property="og:title" content="Eden 🌿" /><meta property="og:site_name" content="Telegram" />
+</head><body><div class="tgme_widget_message">
+<figure class="tgme_widget_message_video_wrap">
+<div class="tgme_widget_message_video js-message_video" style="padding-bottom: 177.78%;">
+  <a href="#" class="tgme_widget_message_video_thumb" style="background-image: url('https://cdn4.telesco.pe/file/eden_t.jpg')">
+    <span class="tgme_widget_message_video_duration"><b>41:05</b></span>
+  </a>
+</div>
+</figure>
+<div class="tgme_widget_message_footer"><span>600 views</span></div>
+</div></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -105,6 +120,9 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://sometube.test/video/pov-kitchen') {
     return new Response(JSONLD_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://t.me/testchannel/1343') {
+    return new Response(TME_POST_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   if (u === 'https://sometube.test/latest') {
     return new Response(GALLERY_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -243,6 +261,20 @@ async function main() {
   check('scraped description kept', scraped.description?.includes('hotel room scene'))
   check('scraped tags/category kept', scraped.category === 'MILF' && scraped.tags.length > 0)
   check('draft consumed', (await env.VIDEOS.get(`draft:${draftId}`)) == null)
+
+  console.log('— scraping: t.me post (duration + aspect from widget markup)')
+  sentMessages = []
+  await webhook(env, textMsg(111, 'https://t.me/testchannel/1343'))
+  check('t.me draft card shows the real duration', lastText().includes('41:05'), lastText())
+  const tmeId = /id: (d[a-z0-9]+)/.exec(lastText())[1]
+  sentMessages = []
+  editedMessages = []
+  await webhook(env, callback(111, `p:${tmeId}`))
+  feed = await feedOf(env)
+  const tmeVideo = feed.find((x) => x.title?.includes('Eden')) || {}
+  check('t.me duration scraped to seconds', tmeVideo.durationSec === 2465, JSON.stringify(tmeVideo.durationSec))
+  check('t.me portrait aspect recorded', tmeVideo.width === 400 && tmeVideo.height === 711, JSON.stringify({ w: tmeVideo.width, h: tmeVideo.height }))
+  check('t.me post link kept as source', tmeVideo.sourceUrl === 'https://t.me/testchannel/1343', JSON.stringify(tmeVideo.sourceUrl))
 
   console.log('— scraping: JSON-LD single video')
   sentMessages = []

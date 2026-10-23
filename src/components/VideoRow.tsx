@@ -23,16 +23,24 @@ export default function VideoRow({ video, description, compact = false }: VideoR
       <Link
         to={`/watch/${video.id}`}
         className={`relative shrink-0 overflow-hidden rounded-xl bg-raise ${
-          compact ? 'w-[168px]' : 'w-[240px] sm:w-[320px]'
+          video.isPortrait
+            ? compact
+              ? 'w-[120px]'
+              : 'w-[180px] sm:w-[220px]'
+            : compact
+              ? 'w-[168px]'
+              : 'w-[240px] sm:w-[320px]'
         }`}
-        style={{ aspectRatio: '16 / 9' }}
+        style={{ aspectRatio: video.isPortrait ? '9 / 16' : '16 / 9' }}
       >
         <img
           src={video.thumbnail}
           alt={video.title}
           loading="lazy"
           referrerPolicy="no-referrer"
-          className="h-full w-full object-cover transition duration-500 group-hover/row:scale-[1.03]"
+          className={`h-full w-full transition duration-500 group-hover/row:scale-[1.03] ${
+            video.isPortrait ? 'object-contain' : 'object-cover'
+          }`}
         />
         {isAd && (
           <span className="absolute left-2 top-2 rounded-[4px] bg-black/60 px-1.5 py-[2px] text-[10.5px] font-semibold text-white">

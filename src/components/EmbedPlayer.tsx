@@ -7,6 +7,8 @@ interface EmbedPlayerProps {
   poster: string
   duration?: string
   protectedEmbed?: boolean
+  /** Vertical media: letterbox the poster instead of cropping the scene away. */
+  isPortrait?: boolean
 }
 
 /**
@@ -26,7 +28,7 @@ interface EmbedPlayerProps {
  *    An invisible shield also covers that title area so it is not clickable.
  *    The hover lock control extends the shield to the whole player.
  */
-export default function EmbedPlayer({ src, title, poster }: EmbedPlayerProps) {
+export default function EmbedPlayer({ src, title, poster, duration, isPortrait }: EmbedPlayerProps) {
   const [activated, setActivated] = useState(false)
   const [clicksLocked, setClicksLocked] = useState(false)
 
@@ -42,13 +44,22 @@ export default function EmbedPlayer({ src, title, poster }: EmbedPlayerProps) {
           src={poster}
           alt=""
           referrerPolicy="no-referrer"
-          className="absolute inset-0 h-full w-full object-cover"
+          className={`absolute inset-0 h-full w-full ${
+            isPortrait ? 'object-contain' : 'object-cover'
+          }`}
         />
         <span className="absolute inset-0 flex items-center justify-center">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition group-hover/embed:scale-105 group-hover/embed:bg-brand-600">
             <Play size={28} className="translate-x-[2px] fill-white" />
           </span>
         </span>
+
+        {/* Timestamp on the facade, mirroring the card badge. */}
+        {duration && duration !== '0:00' && (
+          <span className="absolute bottom-2 right-2 rounded-[5px] bg-black/80 px-1.5 py-[3px] text-[11px] font-semibold leading-none text-white">
+            {duration}
+          </span>
+        )}
       </button>
     )
   }

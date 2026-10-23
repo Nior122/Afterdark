@@ -28,7 +28,7 @@ Click **Create** in the header (or "Add a video" on the Library page) and paste 
 | `vimeo.com/123456` | Plays inline in the Vimeo player |
 | `https://…/clip.mp4` (mp4, webm, ogg, mov, m4v) | Plays in the native HTML5 player |
 | `https://…/embed/…` (generic embed player) | Plays inline behind a click shield (see below) |
-| `https://t.me/<public-channel>/<post>` | Plays inline through Telegram's protected post embed (private `/c/…` posts are preview-only) |
+| `https://t.me/<public-channel>/<post>` | Plays inline through Telegram's protected post embed; the post's duration and portrait/landscape shape are read from the widget markup (private `/c/…` posts are preview-only) |
 | Any other page | Shows the thumbnail with an "Open original" button |
 
 **Click-shielded embeds:** generic `/embed/…` players render through `EmbedPlayer` with no text over
@@ -42,6 +42,16 @@ files are stored. Their raw source URL is not shown on the watch page. Public Te
 stable post URL and `TelegramPlayer`, never a temporary tokenised CDN MP4 URL. Telegram thumbnails are
 the post's actual poster images hotlinked from Telegram's CDN (still link-only, nothing stored); the
 Create dialog auto-detects the poster for newly pasted public Telegram posts.
+
+**Shape and timestamps:** a video whose media is taller than wide (vertical phone clips — the Worker
+stores the pixel dimensions for bot uploads, and reads them back from the padding of a `t.me` post
+widget for link imports) keeps its shape everywhere: portrait cards in the masonry catalogue grid, a
+letterboxed (uncropped) poster on the card and the player facade, instead of the scene being cropped
+to a 16:9 band. The clip's length shows as a timestamp badge on every card, row and poster facade,
+and in the generic description line for caption-less uploads. For `t.me` links the duration is read
+from the post widget itself (`tgme_widget_message_video_duration` overlay), so Telegram videos get a
+real `41:05` badge instead of `0:00`; videos imported before this reads `0:00` until deleted and
+re-added by link.
 
 Fields: URL (required), title (required, auto-filled for YouTube links), optional thumbnail URL,
 category and optional duration (`8:31` or seconds). Everything is stored in the browser only —
@@ -147,7 +157,7 @@ What the bot does:
 | Feature | How |
 | --- | --- |
 | Publish a forwarded video | Caption line 1 = title, `#Hashtags` = tags/category; published immediately |
-| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). Source URLs already on the site come back as duplicates instead of new drafts |
+| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
