@@ -267,6 +267,11 @@ async function main() {
   await webhook(env, textMsg(111, 'https://t.me/testchannel/1343'))
   check('t.me draft card shows the real duration', lastText().includes('41:05'), lastText())
   const tmeId = /id: (d[a-z0-9]+)/.exec(lastText())[1]
+  const draftsList = await call({ ...env, ADMIN_TOKEN: 'admin-secret' }, 'https://worker.test/api/admin/drafts', {
+    headers: { Authorization: 'Bearer admin-secret', 'Content-Type': 'application/json' },
+  })
+  const tmeDraft = (await draftsList.json()).drafts.find((d) => d.id === tmeId) || {}
+  check('dashboard draft echo carries duration + shape', tmeDraft.durationSec === 2465 && tmeDraft.width === 400 && tmeDraft.height === 711, JSON.stringify(tmeDraft).slice(0, 140))
   sentMessages = []
   editedMessages = []
   await webhook(env, callback(111, `p:${tmeId}`))
@@ -426,6 +431,8 @@ async function main() {
   check('admin lists videos', videosRes.status === 200 && Array.isArray(videosBody.videos) && videosBody.videos.length > 0)
   const linkVideo = videosBody.videos.find((v) => v.kind === 'link')
   check('link videos expose sourceUrl, not streamUrl', Boolean(linkVideo?.sourceUrl) && linkVideo.streamUrl === null, JSON.stringify(linkVideo))
+  const tmeListed = videosBody.videos.find((v) => v.durationSec === 2465) || {}
+  check('admin video list exposes media dimensions', tmeListed.width === 400 && tmeListed.height === 711, JSON.stringify({ w: tmeListed.width, h: tmeListed.height }))
 
   const renameRes = await admin(`videos/${linkVideo.id}`, {
     method: 'PATCH',

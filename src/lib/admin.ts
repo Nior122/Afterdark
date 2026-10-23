@@ -14,6 +14,9 @@ export interface AdminVideo {
   category: string
   tags: string[]
   durationSec: number
+  /** Media pixel dimensions when known — the dashboard frames portrait thumbs portrait. */
+  width?: number
+  height?: number
   kind: 'telegram' | 'link'
   tooLarge?: boolean
   /** Real view count from the Worker's counter (0 until the first view). */
@@ -34,6 +37,8 @@ export interface AdminDraft {
   category: string
   tags: string[]
   durationSec: number
+  width?: number
+  height?: number
   sourceUrl: string
   thumbUrl: string
   description: string

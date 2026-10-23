@@ -31,10 +31,13 @@ execFileSync(
 )
 
 let mode = 'public'
+// Optional payloads the admin endpoints answer with (portrait-thumb checks).
+let adminVideos = []
+let adminDrafts = []
 const requests = []
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-function setupDom(pathname, accepted = true) {
+function setupDom(pathname, accepted = true, session = null) {
   const dom = new JSDOM(
     '<!doctype html><html><head><base href="/"></head><body><div id="root"></div></body></html>',
     { url: `https://afterdark.test${pathname}`, pretendToBeVisual: true },
@@ -44,6 +47,8 @@ function setupDom(pathname, accepted = true) {
   // The age gate now lives inside the router, so it is part of every page.
   // Default the harness to a returning visitor; one scenario tests the gate.
   if (accepted) window.localStorage.setItem('afterdark.age.v1', 'yes')
+  // The admin token lives in sessionStorage (see lib/admin.ts), not localStorage.
+  for (const [key, value] of Object.entries(session || {})) window.sessionStorage.setItem(key, value)
   window.scrollTo = () => {}
   window.HTMLElement.prototype.scrollIntoView = () => {}
   for (const key of [
@@ -70,15 +75,15 @@ function mockFetch() {
         { status: 200 },
       )
     }
-    if (url.endsWith('/api/admin/videos')) return new Response(JSON.stringify({ videos: [], total: 0 }), { status: 200 })
-    if (url.endsWith('/api/admin/drafts')) return new Response(JSON.stringify({ drafts: [] }), { status: 200 })
+    if (url.endsWith('/api/admin/videos')) return new Response(JSON.stringify({ videos: adminVideos, total: adminVideos.length }), { status: 200 })
+    if (url.endsWith('/api/admin/drafts')) return new Response(JSON.stringify({ drafts: adminDrafts }), { status: 200 })
     return new Response('{}', { status: 200 })
   }
 }
 
-function mountApp(pathname, currentMode, accepted = true) {
+function mountApp(pathname, currentMode, accepted = true, session = null) {
   mode = currentMode
-  const dom = setupDom(pathname, accepted)
+  const dom = setupDom(pathname, accepted, session)
   mockFetch()
   delete require.cache[require.resolve(bundle)]
   require(bundle).mount(dom.window.document.getElementById('root'))
@@ -127,6 +132,48 @@ async function run() {
   text = dom.window.document.body.textContent
   check('dashboard: renders sign-in', /Owner sign-in|ADMIN_TOKEN/i.test(text), text.slice(0, 160))
   check('dashboard: token field present', Boolean(dom.window.document.querySelector('input[type="password"]')))
+
+  // Signed-in dashboard with portrait media: both the Videos rows and the
+  // Drafts cards must frame a taller-than-wide thumb portrait (56x96 video /
+  // 56x80 draft, letterboxed) instead of cropping it into a landscape band.
+  const portraitThumb = { width: 400, height: 711 }
+  adminVideos = [{
+    id: 'w-domportrait', title: 'Dom Portrait Video', category: 'POV', tags: ['POV'],
+    durationSec: 2465, kind: 'link', tooLarge: false, views: 3,
+    sourceUrl: 'https://t.me/testchannel/1343', streamUrl: null,
+    thumbUrl: 'https://source.test/portrait.jpg', description: '', site: 't.me',
+    createdAt: Date.now(), updatedAt: null, ...portraitThumb,
+  }]
+  adminDrafts = [{
+    id: 'd-domportrait', title: 'Dom Portrait Draft', category: 'POV', tags: [],
+    durationSec: 61, sourceUrl: 'https://t.me/testchannel/9001',
+    thumbUrl: 'https://source.test/portrait.jpg', description: '', site: 't.me',
+    createdAt: Date.now(), ...portraitThumb,
+  }]
+  dom = mountApp('/admin/', 'public', true, { 'afterdark.admin.v1': 'dom-admin-token' })
+  await wait(700)
+  const thumbImg = (el) => (el.getAttribute('src') || '').includes('portrait.jpg')
+  let imgs = Array.from(dom.window.document.querySelectorAll('img')).filter(thumbImg)
+  check(
+    'dashboard videos tab: portrait thumb framed portrait',
+    imgs.some((el) => /h-24 w-14/.test(el.className) && /object-contain/.test(el.className)),
+    imgs.map((el) => el.className).join(' | ').slice(0, 200),
+  )
+  const draftsButton = Array.from(dom.window.document.querySelectorAll('button')).find(
+    (button) => /^Drafts/.test((button.textContent || '').trim()),
+  )
+  check('dashboard: drafts tab button found', Boolean(draftsButton))
+  draftsButton?.click()
+  await wait(500)
+  imgs = Array.from(dom.window.document.querySelectorAll('img')).filter(thumbImg)
+  check(
+    'dashboard drafts tab: portrait draft thumb framed portrait',
+    imgs.some((el) => /h-20 w-14/.test(el.className) && /object-contain/.test(el.className)),
+    imgs.map((el) => el.className).join(' | ').slice(0, 200),
+  )
+  check('dashboard drafts tab: draft duration shown', /1:01/.test(dom.window.document.body.textContent), '')
+  adminVideos = []
+  adminDrafts = []
 
   console.log(failures ? `\n${failures} check(s) failed` : '\nall DOM checks passed')
   process.exit(failures ? 1 : 0)
