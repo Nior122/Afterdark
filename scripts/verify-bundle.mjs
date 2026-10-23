@@ -150,9 +150,9 @@ const scenarios = [
     expect: (text) => /18\+ only/i.test(text),
   },
   {
-    name: 'video page renders standalone',
+    name: 'video page renders standalone in direct mode',
     path: '/v/v-pov-kat-mar10/',
-    fetch: okWorker('public'),
+    fetch: okWorker('direct'),
     accepted: true,
     expect: (text) => /Kat Mar10/i.test(text),
     noAnchors: true,
@@ -160,7 +160,7 @@ const scenarios = [
   {
     name: 'video page reports a view to the Worker (per-session dedupe is server-side)',
     path: '/v/v-pov-kat-mar10/',
-    fetch: okWorker('public'),
+    fetch: okWorker('direct'),
     accepted: true,
     noAnchors: true,
     expect: (text) => /Kat Mar10/i.test(text),
@@ -170,6 +170,44 @@ const scenarios = [
       )],
       ['view POST carries a browser session id', calls.some(
         (call) => call.method === 'POST' && /\/view$/.test(call.url) && /"session":"s-/.test(call.body),
+      )],
+    ],
+  },
+  {
+    name: 'a shared /v/ link follows the site into public mode instead of staying standalone',
+    path: '/v/v-pov-kat-mar10/',
+    fetch: okWorker('public'),
+    accepted: true,
+    expect: (text) => /Opening this video on the site/i.test(text),
+  },
+  {
+    name: 'the watch page never prints the Worker’s own stream URL',
+    path: '#/watch/tg-leaktest',
+    accepted: true,
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'tg-leaktest', title: 'Caption Only Video', description: 'my private caption',
+            category: 'POV', tags: ['POV'], durationSec: 8, kind: 'telegram',
+            streamUrl: 'https://worker.test/api/videos/tg-leaktest/stream.mp4',
+            thumbUrl: null, sourceUrl: null, createdAt: Date.now(), updatedAt: null,
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    expect: (text) =>
+      /Caption Only Video/.test(text) &&
+      /my private caption/.test(text) &&
+      !/stream\.mp4/.test(text) &&
+      !/Copy page link/i.test(text),
+    probe: (calls) => [
+      ['view still reported from the watch page', calls.some(
+        (call) => call.method === 'POST' && /\/api\/videos\/tg-leaktest\/view$/.test(call.url),
       )],
     ],
   },

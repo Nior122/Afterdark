@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Route, Routes, useParams } from 'react-router-dom'
 import App from './App'
 import AgeGate from './components/AgeGate'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -40,6 +40,34 @@ function basename(): string {
 /** How long the catalogue may wait for the mode before assuming "public". */
 const MODE_WAIT_MS = 1500
 
+/**
+ * A shared /v/<id>/ link while the site is in direct mode shows the clean
+ * standalone page — that is what link-only mode is for. Once the owner flips
+ * the site to public, the same link follows the mode and opens the full watch
+ * experience (header, up-next, share), because the refresh on mount / tab
+ * focus reports 'public'. The hop is one-way: the legacy #/watch shim in
+ * main.tsx stays quiet while the site is public, so the two cannot ping-pong.
+ */
+function VideoRoute() {
+  const { id } = useParams()
+  const { mode } = useSiteSettings()
+
+  useEffect(() => {
+    if (mode === 'public' && id) {
+      window.location.replace(`${deployBase()}#/watch/${encodeURIComponent(id)}`)
+    }
+  }, [mode, id])
+
+  if (mode === 'public') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-surface text-[13px] text-muted" aria-busy="true">
+        Opening this video on the site…
+      </div>
+    )
+  }
+  return <DirectVideoPage />
+}
+
 /** The catalogue, gated by the site mode. */
 function CatalogueRoot() {
   const { mode } = useSiteSettings()
@@ -66,7 +94,7 @@ export default function Root() {
       <ErrorBoundary>
         <BrowserRouter basename={basename()}>
           <Routes>
-            <Route path="/v/:id" element={<AgeGate><DirectVideoPage /></AgeGate>} />
+            <Route path="/v/:id" element={<AgeGate><VideoRoute /></AgeGate>} />
             <Route path="*" element={<AgeGate><NotFoundPage /></AgeGate>} />
           </Routes>
         </BrowserRouter>

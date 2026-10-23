@@ -68,7 +68,7 @@ export interface SiteSettings {
 }
 
 /** Last known mode, so a reload does not flash the wrong layout. */
-function cachedMode(): SiteMode | null {
+export function cachedMode(): SiteMode | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = window.sessionStorage.getItem(CACHE_KEY)
