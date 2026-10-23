@@ -65,10 +65,10 @@ export function mapFeedVideo(v: FeedVideo): Video {
     declaredCategory ??
     channelForVideo({ id: v.id, channelId: '', category: '' }).category
   // Scraped videos carry their own description; only fill in the generic line
-  // when the source had nothing to say.
+  // when the source had nothing to say. The generic line names nothing about
+  // where the file lives — no 'Source: Telegram' text on viewer-facing pages.
   const description =
-    v.description?.trim() ||
-    `${category} · ${duration}.${v.site ? ` Source: ${v.site}.` : ''}`
+    v.description?.trim() || `${category} · ${duration}.`
   // Real counted views once the video has any; until then the derived
   // placeholder keeps a just-published video from showing "0 views".
   const counted = typeof v.views === 'number' && v.views > 0 ? v.views : null
