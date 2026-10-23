@@ -5,6 +5,10 @@ interface TelegramPlayerProps {
   src: string
   title: string
   poster: string
+  /** Clip length for the poster overlay ("41:05"); hidden when unknown. */
+  duration?: string
+  /** Vertical media: letterbox the poster instead of cropping the scene away. */
+  isPortrait?: boolean
 }
 
 interface TelegramWidgetMessage {
@@ -31,7 +35,7 @@ function clampContentHeight(height: number): number {
  * Telegram in a new tab. Telegram's resize messages are accepted only from
  * this iframe and only from the `https://t.me` origin.
  */
-export default function TelegramPlayer({ src, title, poster }: TelegramPlayerProps) {
+export default function TelegramPlayer({ src, title, poster, duration, isPortrait }: TelegramPlayerProps) {
   const [activated, setActivated] = useState(false)
   const [clicksLocked, setClicksLocked] = useState(false)
   const [contentHeight, setContentHeight] = useState(560)
@@ -112,13 +116,23 @@ export default function TelegramPlayer({ src, title, poster }: TelegramPlayerPro
           src={poster}
           alt=""
           referrerPolicy="no-referrer"
-          className="absolute inset-0 h-full w-full object-cover"
+          className={`absolute inset-0 h-full w-full ${
+            isPortrait ? 'object-contain' : 'object-cover'
+          }`}
         />
         <span className="absolute inset-0 flex items-center justify-center">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition group-hover/telegram:scale-105 group-hover/telegram:bg-brand-600">
             <Play size={28} className="translate-x-[2px] fill-white" />
           </span>
         </span>
+
+        {/* Timestamp on the facade, mirroring the card badge, so the clip's
+            length reads on the video page before anything is loaded. */}
+        {duration && duration !== '0:00' && (
+          <span className="absolute bottom-2 right-2 rounded-[5px] bg-black/80 px-1.5 py-[3px] text-[11px] font-semibold leading-none text-white">
+            {duration}
+          </span>
+        )}
       </button>
     )
   }

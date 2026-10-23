@@ -34,6 +34,9 @@ interface FeedVideo {
   site?: string
   /** Real view count from the Worker (0 until the first view is reported). */
   views?: number
+  /** Media pixel dimensions, when known — height > width renders the card portrait. */
+  width?: number
+  height?: number
 }
 
 const FEED_BASE = (import.meta.env.VITE_TELEGRAM_FEED_URL as string | undefined)?.replace(
@@ -87,6 +90,9 @@ export function mapFeedVideo(v: FeedVideo): Video {
     // Link videos are third-party pages/players: keep them click-shielded so a
     // viewer cannot be navigated off the site by the embedded player.
     protectedEmbed: Boolean(v.sourceUrl),
+    // Portrait upload (vertical phone clip): cards frame it 9:16 and poster
+    // facades letterbox, so the scene stays visible instead of cropped.
+    isPortrait: Boolean(v.width && v.height && v.height > v.width),
   }
 }
 
