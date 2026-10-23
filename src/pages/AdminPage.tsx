@@ -1023,6 +1023,9 @@ function VideoManager({
 
         {rows.map((video) => {
           const isEditing = editing === video.id
+          // Portrait media keeps its shape in the dashboard too: an uncropped
+          // letterboxed thumb instead of a 96px-wide crop of the middle band.
+          const portrait = (video.width ?? 0) > 0 && (video.height ?? 0) > (video.width ?? 0)
           return (
             <div key={video.id} className="flex flex-wrap items-start gap-3 p-3">
               <input
@@ -1038,10 +1041,16 @@ function VideoManager({
                   alt=""
                   loading="lazy"
                   referrerPolicy="no-referrer"
-                  className="h-14 w-24 shrink-0 rounded-lg bg-raise object-cover"
+                  className={`${
+                    portrait ? 'h-24 w-14' : 'h-14 w-24'
+                  } shrink-0 rounded-lg bg-raise ${portrait ? 'object-contain' : 'object-cover'}`}
                 />
               ) : (
-                <span className="grid h-14 w-24 shrink-0 place-items-center rounded-lg bg-raise text-muted">
+                <span
+                  className={`grid ${
+                    portrait ? 'h-24 w-14' : 'h-14 w-24'
+                  } shrink-0 place-items-center rounded-lg bg-raise text-muted`}
+                >
                   <Film size={16} />
                 </span>
               )}
@@ -1565,6 +1574,7 @@ function DraftList({
       <div className="mt-3 divide-y divide-line rounded-2xl border border-line bg-panel">
         {drafts.map((draft) => {
           const isEditing = editing === draft.id
+          const portrait = (draft.width ?? 0) > 0 && (draft.height ?? 0) > (draft.width ?? 0)
           return (
             <div key={draft.id} className="flex flex-wrap items-start gap-3 p-3">
               {draft.thumbUrl ? (
@@ -1572,10 +1582,16 @@ function DraftList({
                   src={draft.thumbUrl}
                   alt=""
                   referrerPolicy="no-referrer"
-                  className="h-14 w-20 shrink-0 rounded-lg object-cover"
+                  className={`${
+                    portrait ? 'h-20 w-14' : 'h-14 w-20'
+                  } shrink-0 rounded-lg bg-raise ${portrait ? 'object-contain' : 'object-cover'}`}
                 />
               ) : (
-                <span className="grid h-14 w-20 shrink-0 place-items-center rounded-lg bg-raise text-muted">
+                <span
+                  className={`grid ${
+                    portrait ? 'h-20 w-14' : 'h-14 w-20'
+                  } shrink-0 place-items-center rounded-lg bg-raise text-muted`}
+                >
                   <Film size={16} />
                 </span>
               )}

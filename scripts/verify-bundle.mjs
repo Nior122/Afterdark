@@ -308,6 +308,45 @@ const scenarios = [
     ],
   },
   {
+    name: 'the dashboard draws portrait thumbs in their real shape',
+    path: '/admin/',
+    session: { 'afterdark.admin.v1': 'probe-admin-token' },
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', modes: ['public', 'direct'], redirectUrl: '', ads: { ...adsFixture_ }, slots: ['header', 'native', 'sidebar', 'footer', 'video', 'popunder'], updatedAt: null, adsUpdatedAt: null, github: false, feedUrl: origin }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'w-portrait', title: 'Portrait Fixture Video', category: 'POV', tags: ['POV'],
+            durationSec: 2465, width: 400, height: 711, kind: 'link', tooLarge: false, views: 5,
+            sourceUrl: 'https://t.me/testchannel/1343', thumbUrl: 'https://source.test/portrait.jpg',
+            streamUrl: null, description: '', site: 't.me', createdAt: Date.now(), updatedAt: null,
+          }],
+          total: 1,
+          viewsTotal: 5,
+        }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/drafts')) return Promise.resolve(new Response(JSON.stringify({ drafts: [] }), { status: 200 }))
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    expect: (text) => /Portrait Fixture Video/.test(text) && /41:05/.test(text),
+    probes: (w) => {
+      const img = Array.from(w.document.querySelectorAll('img')).find((el) =>
+        (el.getAttribute('src') || '').includes('portrait.jpg'),
+      )
+      return [
+        [
+          'portrait thumb framed 56x96 and letterboxed',
+          Boolean(img && /h-24 w-14/.test(img.className) && /object-contain/.test(img.className)),
+        ],
+      ]
+    },
+  },
+  {
     name: 'dashboard shows sign-in, never age-gated',
     path: '/admin/',
     fetch: okWorker('public'),

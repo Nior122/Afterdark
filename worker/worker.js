@@ -551,6 +551,8 @@ async function handleAdmin(request, env, url) {
           category: video.category,
           tags: video.tags || [],
           durationSec: video.durationSec || 0,
+          width: video.width || 0,
+          height: video.height || 0,
           kind: video.kind || 'telegram',
           tooLarge: Boolean(video.tooLarge),
           views: viewsById.get(video.id) || 0,

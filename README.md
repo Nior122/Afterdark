@@ -46,8 +46,8 @@ Create dialog auto-detects the poster for newly pasted public Telegram posts.
 **Shape and timestamps:** a video whose media is taller than wide (vertical phone clips — the Worker
 stores the pixel dimensions for bot uploads, and reads them back from the padding of a `t.me` post
 widget for link imports) keeps its shape everywhere: portrait cards in the masonry catalogue grid, a
-letterboxed (uncropped) poster on the card and the player facade, instead of the scene being cropped
-to a 16:9 band. The clip's length shows as a timestamp badge on every card, row and poster facade,
+letterboxed (uncropped) poster on the card and the player facade — and portrait thumbs in the admin
+dashboard too (Videos rows and Drafts cards), instead of the scene being cropped to a 16:9 band. The clip's length shows as a timestamp badge on every card, row and poster facade,
 and in the generic description line for caption-less uploads. For `t.me` links the duration is read
 from the post widget itself (`tgme_widget_message_video_duration` overlay), so Telegram videos get a
 real `41:05` badge instead of `0:00`; videos imported before this reads `0:00` until deleted and
