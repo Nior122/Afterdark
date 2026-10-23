@@ -201,6 +201,10 @@ baked into the build, so none of it needs a rebuild:
   are served as a plain `200` by the middleware before anything is fetched: the dashboard never
   sees a redirect — not even Pages' permanent trailing-slash `308`, which a browser that cached
   an older one would otherwise replay forever without touching the network.
+- **Version tolerance** — the dashboard normalises settings/videos/drafts responses (missing
+  `ads`, `slots`, `views`, `total`, `drafts` all get their defaults) so a Worker deployed from an
+  older commit can't crash it: features the old Worker lacks show defaults instead of an error
+  page. Redeploy the Worker to actually use them.
 
 ## Screens
 
@@ -349,7 +353,7 @@ is dark and `<div id="root">` is empty. Check, in this order:
 | `npm run verify` | Assert the built site: sitemap coverage, per-page metadata, no links between videos |
 | `npm run verify:render` | Server-render each video page and assert it contains no anchors/other videos |
 | `npm run verify:dom` | jsdom check of the mode gate, the video page and the dashboard sign-in |
-| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in, a stalled Worker surfacing the timeout message instead of "Checking…", and the signed-in videos table with views), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
+| `npm run verify:bundle` | runs the **built** bundle in jsdom: first visit, returning visitor, direct mode, unreachable/silent Worker, video page + its view POST, dashboard (sign-in, a stalled Worker surfacing the timeout message instead of "Checking…", the signed-in videos table with views, and surviving an old Worker's settings shape), ad injection incl. per-slot switches and preview outlines. Build first with `VITE_TELEGRAM_FEED_URL=https://worker.test` — the scenarios impersonate that Worker |
 | `npm run verify:middleware` | drives `functions/_middleware.ts`: which URLs 302, which never do, new-video fallback, the dashboard served with a redirect-free `200` (even offline), and that a hung Worker is cut off instead of hanging the navigation |
 | `npm test --prefix .` | `node worker/test_local.mjs` — the Worker's mocked test suite |
 

@@ -78,7 +78,7 @@ function cachedMode(): SiteMode | null {
   }
 }
 
-function normaliseAds(value: unknown): AdConfig {
+export function normaliseAds(value: unknown): AdConfig {
   // Copy the per-slot defaults too: EMPTY_ADS.slotsOn is shared otherwise.
   const ads: AdConfig = { ...EMPTY_ADS, slotsOn: { ...EMPTY_ADS.slotsOn } }
   if (!value || typeof value !== 'object') return ads
