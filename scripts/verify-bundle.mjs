@@ -181,6 +181,31 @@ const scenarios = [
     expect: (text) => /Opening this video on the site/i.test(text),
   },
   {
+    name: 'caption-less bot videos show no "Source" line on video pages',
+    path: '/v/tg-nodesc/',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'direct', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'tg-nodesc', title: 'Bare Upload', description: '', category: 'Homemade',
+            tags: ['Homemade'], durationSec: 9, kind: 'telegram',
+            streamUrl: 'https://worker.test/api/videos/tg-nodesc/stream.mp4',
+            thumbUrl: null, sourceUrl: null, site: 'Telegram', createdAt: Date.now(), updatedAt: null,
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) =>
+      /Bare Upload/.test(text) &&
+      /Homemade · 0:09/.test(text) &&
+      !/Source:/i.test(text),
+  },
+  {
     name: 'the watch page never prints the Worker’s own stream URL',
     path: '#/watch/tg-leaktest',
     accepted: true,
