@@ -27,6 +27,7 @@ import {
   AdminError,
   getToken,
   setToken,
+  workerMissingFields,
   type AdminDraft,
   type AdminSettings,
   type AdminVideo,
@@ -59,6 +60,9 @@ type SortKey = 'views' | 'newest' | 'title'
 const CATEGORY_OPTIONS = [...CATEGORIES]
 /** Videos per page in the bulk-management table. */
 const VIDEOS_PAGE_SIZE = 20
+/** Private Telegram targets the scraper could never read — rejected locally. */
+const PRIVATE_TG_LINK = /^https?:\/\/(?:www\.)?(?:t\.me|telegram\.dog)\/(?:c\/\d+|joinchat\/|\+)/i
+
 /** Per-URL status flow of the bulk scrape, matching the Worker's responses. */
 const MAX_SCRAPE_URLS = 20
 type ScrapeStatus = 'queued' | 'scraping' | 'scraped' | 'blocked' | 'duplicate'
@@ -461,6 +465,15 @@ export default function AdminPage() {
           </p>
         </div>
       </section>
+
+      {workerMissingFields().length > 0 && (
+        <Notice tone="warn">
+          <span className="font-semibold">This Worker predates the dashboard.</span> Its settings reply has no{' '}
+          <Code>{workerMissingFields().join(', ')}</Code> — those toggles are shown with defaults and saving them
+          may not stick. Redeploy <Code>worker/worker.js</Code> (<Code>wrangler deploy</Code> in the{' '}
+          <Code>worker/</Code> directory); bot commands keep working meanwhile.
+        </Notice>
+      )}
 
       {/* Tabs */}
       <div className="mt-6 flex items-center gap-2 border-b border-line pb-2">
@@ -1232,6 +1245,18 @@ function ScrapePanel({
     let duplicates = 0
     let blocked = 0
     for (const [index, url] of targets.entries()) {
+      // Private links fail before the Worker call: an unreachable or older
+      // Worker used to burn its entire fetch budget on t.me/c/… URLs, which
+      // are member-only pages no scraper can read — ever.
+      if (PRIVATE_TG_LINK.test(url)) {
+        blocked += 1
+        updateRow(index, {
+          status: 'blocked',
+          message:
+            'private Telegram link — only channel members can open it. Make the channel public, RE-COPY the post link (it should read t.me/<name>/<id> now — old /c/ links stay member-only), or paste a direct file/embed link.',
+        })
+        continue
+      }
       updateRow(index, { status: 'scraping' })
       try {
         const result = await admin.scrape(url)

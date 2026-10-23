@@ -181,7 +181,12 @@ baked into the build, so none of it needs a rebuild:
   single gallery URL) and scrapes them one after another through the same `/api/admin/scrape`
   endpoint the bot uses. Each URL gets its own status as the run goes: `queued → scraping →`
   `scraped · N` / `blocked` (page refused us) / `duplicate` (its source is already published or
-  drafted — the Worker reports the count). When the run finishes: **Publish all**, **Review each**
+  drafted — the Worker reports the count). Private Telegram links (`t.me/c/…`, `t.me/+…`,
+  `t.me/joinchat/…`) are refused on the spot — by the panel before any call and by the Worker
+  before any fetch — with the way round: make the channel public, RE-COPY the post link (old
+  `/c/` links stay member-only afterwards) and paste that; it also sidesteps the bot's 20 MB
+  file cap, since a post link never passes the file through the bot.
+  When the run finishes: **Publish all**, **Review each**
   (jumps to Drafts) or **Discard batch** (only the drafts this run created).
 - **Bulk video management** — the *Videos* tab has search, a category filter and sorting
   (most views / newest / title A–Z), pagination, and checkbox selection with a bulk bar: delete
@@ -204,7 +209,9 @@ baked into the build, so none of it needs a rebuild:
 - **Version tolerance** — the dashboard normalises settings/videos/drafts responses (missing
   `ads`, `slots`, `views`, `total`, `drafts` all get their defaults) so a Worker deployed from an
   older commit can't crash it: features the old Worker lacks show defaults instead of an error
-  page. Redeploy the Worker to actually use them.
+  page, and a banner names the missing fields up front. Saves are **verified by read-back**: a
+  toggle that the old Worker silently ignores now fails loudly ("The Worker did not save the site
+  mode…") instead of flipping back on the next refresh. Redeploy the Worker to actually use them.
 
 ## Screens
 

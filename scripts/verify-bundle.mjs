@@ -254,7 +254,11 @@ const scenarios = [
     expect: (text) =>
       !/Something went wrong/i.test(text) &&
       /Old Worker Fixture/.test(text) &&
-      /Ads/i.test(text),
+      /Ads/i.test(text) &&
+      // The banner must name the staleness and how to fix it — not just
+      // silently show defaults that never save.
+      /predates the dashboard/i.test(text) &&
+      /wrangler deploy/i.test(text),
     probes: (window) => [
       ['videos total falls back to the list length', !/views total/i.test(window.document.body.textContent || '') || /0 views total/.test(window.document.body.textContent || '')],
     ],
