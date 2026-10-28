@@ -274,6 +274,7 @@ async function main() {
   })
   const tmeDraft = (await draftsList.json()).drafts.find((d) => d.id === tmeId) || {}
   check('dashboard draft echo carries duration + shape', tmeDraft.durationSec === 2465 && tmeDraft.width === 400 && tmeDraft.height === 711, JSON.stringify(tmeDraft).slice(0, 140))
+  check('t.me video poster extracted from the widget thumbnail', tmeDraft.thumbUrl === 'https://cdn4.telesco.pe/file/eden_t.jpg', String(tmeDraft.thumbUrl))
   sentMessages = []
   editedMessages = []
   await webhook(env, callback(111, `p:${tmeId}`))
@@ -282,6 +283,7 @@ async function main() {
   check('t.me duration scraped to seconds', tmeVideo.durationSec === 2465, JSON.stringify(tmeVideo.durationSec))
   check('t.me portrait aspect recorded', tmeVideo.width === 400 && tmeVideo.height === 711, JSON.stringify({ w: tmeVideo.width, h: tmeVideo.height }))
   check('t.me post link kept as source', tmeVideo.sourceUrl === 'https://t.me/testchannel/1343', JSON.stringify(tmeVideo.sourceUrl))
+  check('t.me poster makes it through to the published feed', tmeVideo.thumbUrl === 'https://cdn4.telesco.pe/file/eden_t.jpg', String(tmeVideo.thumbUrl))
 
   console.log('— scraping: JSON-LD single video')
   sentMessages = []

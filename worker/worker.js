@@ -1776,11 +1776,28 @@ const TELEGRAM_POST_URL =
  * and no dimensions, so every Telegram card showed a "0:00" badge.
  */
 function telegramPostMeta(html) {
-  const out = { durationSec: 0, width: 0, height: 0 }
+  const out = { durationSec: 0, width: 0, height: 0, thumbnail: '' }
   const badge =
     /tgme_widget_message_video_duration[^>]*>\s*(?:<b>)?\s*(\d{1,3}:\d{2}(?::\d{2})?)\s*</i.exec(html) ||
     /tgme_widget_message_video[^>]*data-duration="(\d+(?:\.\d+)?)"/i.exec(html)
   if (badge) out.durationSec = parseDurationToSeconds(badge[1])
+
+  // Telegram often puts a video poster only in the widget thumbnail's inline
+  // background-image, not in og:image. Preserve it so the site can show a
+  // poster even when the post's own embed player refuses large media.
+  const thumbNode = /<[^>]*class=["'][^"']*tgme_widget_message_video_thumb[^"']*["'][^>]*>/i.exec(html)?.[0] || ''
+  const thumbStyleMatch = /\bstyle=(?:"([^"]*)"|'([^']*)')/i.exec(thumbNode)
+  const thumbStyle = thumbStyleMatch?.[1] ?? thumbStyleMatch?.[2] ?? ''
+  const thumbMatch = /(?:background(?:-image)?)\s*:\s*url\(\s*(["']?)(https?:\/\/[^)'"\s]+)\1\s*\)/i.exec(thumbStyle)
+  if (thumbMatch) {
+    try {
+      const poster = new URL(decodeEntities(thumbMatch[2]))
+      if (poster.protocol === 'https:') out.thumbnail = poster.toString()
+    } catch {
+      // A malformed widget poster is optional; keep scraping the post.
+    }
+  }
+
   const pad =
     /tgme_widget_message_video(?:_player)?\b[^>]*style="[^"]*padding-bottom:\s*([\d.]+)\s*%/i.exec(html) ||
     /style="[^"]*padding-bottom:\s*([\d.]+)\s*%[^"]*"[^>]*class="[^"]*tgme_widget_message_video/i.exec(html)
@@ -2028,6 +2045,7 @@ function scrapePage(html, pageUrl) {
   if (tgMeta) {
     for (const item of items) {
       if (!item.durationSec && tgMeta.durationSec) item.durationSec = tgMeta.durationSec
+      if (!item.thumbnail && tgMeta.thumbnail) item.thumbnail = tgMeta.thumbnail
       if (!item.width && tgMeta.width) {
         item.width = tgMeta.width
         item.height = tgMeta.height

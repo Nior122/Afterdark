@@ -28,7 +28,7 @@ Click **Create** in the header (or "Add a video" on the Library page) and paste 
 | `vimeo.com/123456` | Plays inline in the Vimeo player |
 | `https://…/clip.mp4` (mp4, webm, ogg, mov, m4v) | Plays in the native HTML5 player |
 | `https://…/embed/…` (generic embed player) | Plays inline behind a click shield (see below) |
-| `https://t.me/<public-channel>/<post>` | Plays inline through Telegram's protected post embed; the post's duration and portrait/landscape shape are read from the widget markup (private `/c/…` posts are preview-only) |
+| `https://t.me/<public-channel>/<post>` | Uses Telegram's protected post embed and displays its poster when available; Telegram may still refuse oversized media with `Media too big — view in Telegram` (private `/c/…` posts are preview-only) |
 | Any other page | Shows the thumbnail with an "Open original" button |
 
 **Click-shielded embeds:** generic `/embed/…` players render through `EmbedPlayer` with no text over
@@ -41,7 +41,9 @@ with only the embed URL, a remote thumbnail URL and metadata (`description`, `ta
 files are stored. Their raw source URL is not shown on the watch page. Public Telegram posts use the
 stable post URL and `TelegramPlayer`, never a temporary tokenised CDN MP4 URL. Telegram thumbnails are
 the post's actual poster images hotlinked from Telegram's CDN (still link-only, nothing stored); the
-Create dialog auto-detects the poster for newly pasted public Telegram posts.
+admin scraper reads the poster from the public post widget when Telegram exposes it. Telegram controls
+whether a post's video can play in an embed, so very large posts may show its `Media too big — view in
+Telegram` notice even though the poster is visible.
 
 **Shape and timestamps:** a video whose media is taller than wide (vertical phone clips — the Worker
 stores the pixel dimensions for bot uploads, and reads them back from the padding of a `t.me` post
@@ -200,9 +202,12 @@ many) clears its counter.
 
 Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
 and the site plays them through its usual shielded player. Telegram bots can only fetch files
-up to 20 MB, so larger files still go through public `t.me` links or a scraped embed URL.
-Note that some sites block server-side requests (403 / JavaScript challenge); the bot reports
-that and suggests pasting the direct embed link instead.
+up to 20 MB. A public `t.me` link avoids the bot download limit, but it does not guarantee
+inline playback: Telegram can block a large post in its embed and show `Media too big — view in
+Telegram`. For dependable inline playback, use a video smaller than 20 MB through the bot or host
+the media at a public direct-video/streaming URL. The admin panel does not currently upload/store
+large video files itself. Some other sites block server-side link scraping (403 / JavaScript
+challenge); use their direct embed link instead.
 
 ### Advanced management (dashboard)
 

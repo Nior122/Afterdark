@@ -323,7 +323,7 @@ should see **Owner sign-in**.
 | Dashboard loads but every tab is empty and the console shows CORS | The Worker URL variable has a trailing slash or a path. It must be exactly `https://…workers.dev` |
 | Mode switch flips, but the site keeps showing the catalogue | The site build has no `VITE_TELEGRAM_FEED_URL` (Part 7), or you're looking at a cached tab — reload it |
 | New video is missing from `sitemap.xml` | Sitemaps are rebuilt at build time. Press **Rebuild site** in the dashboard (Part 4 GitHub secrets needed) or re-run the deploy workflow |
-| "Too large" when forwarding a video | Telegram bots cannot download files over 20 MB. Compress it, or post a `t.me` link instead |
+| "Too large" when forwarding a video | Telegram bots cannot download files over 20 MB. A public `t.me` link avoids the bot download, but Telegram may still refuse the video in its embed (`Media too big — view in Telegram`). Compress it to 20 MB or less, or host it at a public direct-video/streaming URL for inline playback. |
 | Bot says "used a safe fallback caption and tags" | The `AI` binding is missing, the model timed out, or Workers AI quota was reached. The video is still published with neutral text. Check Part 3b and [ai-caption-agent.md](ai-caption-agent.md) |
 | No `📝 AI caption` line on a new upload | The upload was a duplicate, `CAPTION_AGENT=off`, or the AI binding/model is unavailable (check for the fallback warning). New caption text is replaced by AI output |
 | No `🏷 AI hashtags` line on a new upload | The upload was a duplicate, `CAPTION_AGENT=off`, or the AI binding/model is unavailable. Owner hashtags do not prevent AI tag generation |
