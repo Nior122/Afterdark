@@ -54,10 +54,11 @@ const TME_POST_PAGE = `<!doctype html><html><head>
 </div></body></html>`
 
 // WordPress-style page with a JS-configured player: no og:video, no <video>
-// tag — the file lives inside a fluidPlayer() config object only.
+// tag — the file lives inside a fluidPlayer() config object only. The
+// og:title carries a raw &amp; entity the scraped title must decode.
 const FLUID_PAGE = `<!doctype html><html><head>
 <meta property="og:site_name" content="BlogTube" />
-<meta property="og:title" content="Trending Clip XXX video" />
+<meta property="og:title" content="Trending Clip &amp; More XXX video" />
 <meta property="og:image" content="https://blog.test/wp/uploads/clip-400x225.jpg" />
 <script>
   fluidPlayer("mvp-flash-player", {
@@ -65,6 +66,11 @@ const FLUID_PAGE = `<!doctype html><html><head>
   });
 </script>
 </head><body><div id="mvp-flash-player"></div></body></html>`
+
+// Lazy-loader page: no og: tags, no player config — the file sits in a
+// data-src attribute as a site-relative path.
+const DATASRC_PAGE = `<!doctype html><html><head><title>Site Clip Only</title></head>
+<body><div class="vp-player" data-src="/wp/uploads/2026/09/site-clip.mp4"></div></body></html>`
 
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
@@ -139,6 +145,9 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://blog.test/trending-clip') {
     return new Response(FLUID_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://blog.test/datasrc-clip') {
+    return new Response(DATASRC_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   if (u === 'https://sometube.test/latest') {
     return new Response(GALLERY_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -309,6 +318,11 @@ async function main() {
     'js-config mp4 becomes the playable source',
     fluidVideo.sourceUrl === 'https://videos.blog.test/wp/uploads/2026/08/Trending-Clip.mp4',
     JSON.stringify(fluidVideo).slice(0, 200),
+  )
+  check(
+    'scraped titles decode html entities',
+    !fluidVideo.title.includes('&amp;') && fluidVideo.title.includes('Trending Clip & More'),
+    JSON.stringify(fluidVideo.title),
   )
 
   console.log('— scraping: JSON-LD single video')
@@ -537,6 +551,21 @@ async function main() {
   check('admin publishes a draft', publishRes.status === 200)
   check('published video is in the feed', (await feedOf(adminEnv)).some((v) => v.title === 'Draft Renamed In Dashboard'))
   check('draft removed after publish', (await (await admin('drafts', { headers: auth })).json()).drafts.length === 0)
+
+  // Lazy-loader page: the file hides in a data-src attribute as a
+  // site-relative path — the extractor must find it and absolutise it.
+  const relScrape = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://blog.test/datasrc-clip' }),
+  })
+  const relBody = await relScrape.json()
+  check(
+    'data-src relative file becomes an absolute playable source',
+    relBody.drafts?.[0]?.sourceUrl === 'https://blog.test/wp/uploads/2026/09/site-clip.mp4',
+    JSON.stringify(relBody).slice(0, 180),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
 
   const blocked = await admin('scrape', {
     method: 'POST',
