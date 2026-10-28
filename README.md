@@ -29,7 +29,7 @@ Click **Create** in the header (or "Add a video" on the Library page) and paste 
 | `https://…/clip.mp4` (mp4, webm, ogg, mov, m4v) | Plays in the native HTML5 player |
 | `https://…/embed/…` (generic embed player) | Plays inline behind a click shield (see below) |
 | `https://t.me/<public-channel>/<post>` | Plays inline through Telegram's protected post embed; the post's duration and portrait/landscape shape are read from the widget markup (private `/c/…` posts are preview-only) |
-| Any other page | Shows the thumbnail with an "Open original" button |
+| Any other page | The import first digs a media file out of the page — `og:video` meta, `<video>`/`<source>`/`<iframe>` tags, and JS player configs (`sources:[{file:"…mp4"}]`, the Fluid-player shape WordPress blogs use). Found → plays natively; genuinely nothing playable on the page → shows the thumbnail with an "Open original" button |
 
 **Click-shielded embeds:** generic `/embed/…` players render through `EmbedPlayer` with no text over
 the video — a clean poster/play facade loads the iframe only from AfterDark's own button, the hardened
@@ -56,7 +56,10 @@ re-added by link.
 Fields: URL (required), title (required, auto-filled for YouTube links), optional thumbnail URL,
 category and optional duration (`8:31` or seconds). Everything is stored in the browser only —
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are
-tagged **Yours** and can be deleted from their card menu or the watch page.
+tagged **Yours** and can be deleted from their card menu or the watch page. The dialog is a personal
+scratchpad, not the publish path: to give every visitor a video, import the link through the bot or
+the dashboard's **Scrape a link into drafts** — that stores it on the Worker, and the watch page says
+as much on page-only entries ("links added from the Create dialog are saved in this browser only").
 
 **Setting this up for the first time?** Follow
 [docs/cloudflare-setup-walkthrough.md](docs/cloudflare-setup-walkthrough.md) —

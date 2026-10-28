@@ -127,6 +127,14 @@ export default function DirectVideoPage() {
         </p>
       )}
 
+      {(source.kind === 'page' || source.kind === 'none') && video.id.startsWith('u-') && (
+        <p className="mt-3 max-w-[70ch] text-[12.5px] leading-relaxed text-faint">
+          This link is saved in this browser only and points at a page, not a playable file. Import
+          it through the bot or the dashboard’s Scrape panel and the real video file is extracted,
+          so it plays in-page for every visitor.
+        </p>
+      )}
+
       <AdSlot slot="video" className="mt-6" />
       <GlobalAdScript />
     </main>

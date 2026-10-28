@@ -308,6 +308,54 @@ const scenarios = [
     ],
   },
   {
+    name: 'a scraped mp4 plays natively on the watch page',
+    path: '#/watch/w-fileclip',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'w-fileclip', title: 'Blog Clip Playable', category: 'POV', tags: [],
+            durationSec: 150, createdAt: Date.now(), updatedAt: null, description: '',
+            site: 'blog.test', views: 0, sourceUrl: 'https://videos.blog.test/wp/uploads/Trending-Clip.mp4',
+            streamUrl: null, thumbUrl: 'https://blog.test/wp/t.jpg',
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Blog Clip Playable/.test(text) && !/cannot be embedded/i.test(text),
+    probes: (w) => [['native video element rendered', Boolean(w.document.querySelector('video'))]],
+  },
+  {
+    name: 'a browser-local page link explains how to import it properly',
+    path: '#/watch/u-bloglink',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          videos: [{
+            id: 'u-bloglink', title: 'Trending Clip', category: 'POV', tags: [],
+            durationSec: 0, createdAt: Date.now(), updatedAt: null, description: '',
+            site: 'blog.test', views: 0, sourceUrl: 'https://blog.test/trending-clip-video/',
+            streamUrl: null, thumbUrl: 'https://blog.test/wp/t.jpg',
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) =>
+      /cannot be embedded/i.test(text) &&
+      /Open original/i.test(text) &&
+      /Scrape panel/i.test(text),
+  },
+  {
     name: 'the dashboard draws portrait thumbs in their real shape',
     path: '/admin/',
     session: { 'afterdark.admin.v1': 'probe-admin-token' },
