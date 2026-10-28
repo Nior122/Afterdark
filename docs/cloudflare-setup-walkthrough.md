@@ -51,7 +51,7 @@ on Workers AI. **Five minutes, four steps.**
 1. Cloudflare → **Workers & Pages** → click your existing worker (e.g.
    `afterdark-bot`).
 2. **Edit code** → click in the editor → `Ctrl/⌘ + A` → `Delete` → paste the
-   latest <https://raw.githubusercontent.com/Nior122/Afterdark/main/worker/worker.js>
+   latest <https://raw.githubusercontent.com/Nior122/Afterdark/arena/512b1aba-afterdark/worker/worker.js>
    → **Deploy**.
 3. **Settings** → **Variables and Secrets** → **Add** → **Secret** →
    `ADMIN_TOKEN` = a long random string you invent (this is the dashboard
@@ -117,7 +117,7 @@ button. That's the whole of Part 1.
 5. In the editor: click inside the code area, press `Ctrl/⌘ + A` to select all,
    press `Delete` so the box is completely empty.
 6. Open the bot's source in a new tab:
-   👉 <https://raw.githubusercontent.com/Nior122/Afterdark/main/worker/worker.js>
+   👉 <https://raw.githubusercontent.com/Nior122/Afterdark/arena/512b1aba-afterdark/worker/worker.js>
    Select everything there (`Ctrl/⌘ + A`), copy it, and paste it into the
    Cloudflare editor.
 7. Click **Deploy** (top right). Wait for "Deployed" / "Success".
@@ -156,9 +156,10 @@ categories) in Cloudflare **KV**.
 
 ## Part 3b — Turn on AI captions (optional, one more binding)
 
-The site and bot work perfectly without this. With it, Telegram videos you send
-get a short AI-written description when you did not write one, and 2–6
-AI-suggested hashtags when you supplied none.
+The site and bot work without this, using fallback text. With it, every
+eligible Telegram video gets a fresh AI-written description with emojis and
+2–6 hashtags, even if you supplied caption text or hashtags. The first caption
+line remains the title; links are removed from the caption.
 
 1. Still in your Worker → **Settings → Bindings → Add**.
 2. Choose **Workers AI** (or **AI binding**). Set **Variable name** to exactly
@@ -167,7 +168,7 @@ AI-suggested hashtags when you supplied none.
 
 ✅ **Checkpoint:** **Settings → Bindings** now lists both `VIDEOS` and `AI`.
 Send `/caption` to the bot; it should answer `Status: on` with the model name.
-Then send a video with no description and no `#hashtags`; the reply contains
+Then send a new video with any caption or hashtags; the reply contains
 `📝 AI caption:` and `🏷 AI hashtags:` lines. If Workers AI is unavailable, the
 reply says it used fallback text instead — publishing is never blocked.
 
@@ -324,8 +325,8 @@ should see **Owner sign-in**.
 | New video is missing from `sitemap.xml` | Sitemaps are rebuilt at build time. Press **Rebuild site** in the dashboard (Part 4 GitHub secrets needed) or re-run the deploy workflow |
 | "Too large" when forwarding a video | Telegram bots cannot download files over 20 MB. Compress it, or post a `t.me` link instead |
 | Bot says "used a safe fallback caption and tags" | The `AI` binding is missing, the model timed out, or Workers AI quota was reached. The video is still published with neutral text. Check Part 3b and [ai-caption-agent.md](ai-caption-agent.md) |
-| No `📝 AI caption` line on a new upload | You wrote extra caption lines (so your description was kept), the upload was a duplicate, or `CAPTION_AGENT=off`. Owner text is intentionally never replaced |
-| No `🏷 AI hashtags` line on a new upload | You supplied hashtags, the upload was a duplicate, or `CAPTION_AGENT=off`. Owner hashtags are intentionally never replaced |
+| No `📝 AI caption` line on a new upload | The upload was a duplicate, `CAPTION_AGENT=off`, or the AI binding/model is unavailable (check for the fallback warning). New caption text is replaced by AI output |
+| No `🏷 AI hashtags` line on a new upload | The upload was a duplicate, `CAPTION_AGENT=off`, or the AI binding/model is unavailable. Owner hashtags do not prevent AI tag generation |
 
 ---
 

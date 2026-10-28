@@ -2,8 +2,9 @@
 
 Once set up, publishing a video is just this: **forward (or send) the video to
 your Telegram bot → it appears on the website** with its real thumbnail, title
-from the caption, an AI-written description when you did not supply one, and
-AI-suggested tags when you supply no hashtags.
+from the first caption line, and a fresh AI-written description with emojis and
+hashtags. AI writes new description/tags even when you supplied caption text or
+hashtags; URLs are stripped from the uploaded caption.
 
 How it works, in one line:
 
@@ -51,9 +52,9 @@ How it works, in one line:
 
 ## Step 3b — Enable automatic AI captions (optional)
 
-The Worker works without this step; uploads get a deterministic fallback
-caption and tags. To let the AI agent write a short description and suggest
-missing hashtags:
+The Worker works without this step; uploads get deterministic fallback
+text and tags. To let the AI agent write a fresh caption with emojis and
+hashtags on every eligible Telegram upload:
 
 1. In your Worker go to **Settings → Bindings → Add → Workers AI**
    (some dashboards call it an **AI binding**).
@@ -134,19 +135,18 @@ automatically (give it up to a minute for caches).
 ### Publish a video file
 Forward/send a video to the bot — it is published immediately, exactly as before.
 
-- First line of the caption = **title**
-- Extra caption lines = **description**; the AI will not replace them.
-- `#Hashtags` = **tags**; one matching a site category sets the
-  **category** — use underscores for multi-word ones: `#POV`, `#MILF`,
-  `#Big_Ass`, `#Big_Tits`, `#4K_Ultra_HD`. No match → `Homemade`.
+- First line of the caption = **title** (a matching category hashtag can
+  still set the category, e.g. `#POV` or `#Big_Ass`).
+- Extra caption lines and any supplied hashtags are **context for the AI**, not
+  the published description/tag set; the AI writes fresh text and hashtags.
+- URLs such as `https://…`, `www.…`, and `t.me/…` are removed from the caption
+  before it is used or published.
 - No caption → the file name becomes the title.
-- **No description** → the AI agent writes a short, non-explicit caption. It
-  appears on the watch page; the bot reply shows it as `📝 AI caption: …`.
-- **No hashtags** → the same agent suggests 2–6 allow-listed site tags. The bot
-  reply shows them as `🏷 AI hashtags: #POV #Amateur`. Owner text and tags are
-  never replaced; if Workers AI is unavailable the video still publishes with
-  a fallback caption and tags. See
-  [ai-caption-agent.md](ai-caption-agent.md) for setup and privacy details.
+- The AI description appears on the watch page and the bot reply shows
+  `📝 AI caption: …` and `🏷 AI hashtags: #POV #Amateur`.
+- If Workers AI is unavailable, the video still publishes with deterministic
+  fallback text and tags. See [ai-caption-agent.md](ai-caption-agent.md) for
+  setup and privacy details.
 
 ### Publish from a link (scrape → review → confirm)
 Paste a link (or `/add <link>`) and the bot scrapes the page:

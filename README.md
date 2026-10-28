@@ -156,8 +156,8 @@ What the bot does:
 
 | Feature | How |
 | --- | --- |
-| Publish a forwarded video | Caption line 1 = title, extra lines = description, `#Hashtags` = tags/category; published immediately |
-| **AI caption agent** | Cloudflare Workers AI writes a short, non-explicit description when the owner supplied none and suggests 2–6 hashtags when none were supplied. Owner text and tags are never overwritten; scraped links and >20 MB files are skipped. Deterministic fallback caption/tags are used if the model or binding is unavailable — see [docs/ai-caption-agent.md](docs/ai-caption-agent.md) |
+| Publish a forwarded video | First caption line = title; extra text and `#Hashtags` provide context for a fresh AI description/tags; caption URLs are stripped; published immediately |
+| **AI caption agent** | Cloudflare Workers AI writes a fresh, short description with emojis and 2–6 hashtags for every eligible Telegram upload, even when you supplied a caption or hashtags. The first caption line remains the title; extra text is context, URLs are removed, and generated hashtags appear in the description and tag list. Scraped links and >20 MB files are skipped; deterministic fallback text is used if AI is unavailable — see [docs/ai-caption-agent.md](docs/ai-caption-agent.md) |
 | **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
@@ -169,23 +169,23 @@ What the bot does:
 ### Automatic AI captions
 
 Bind **Workers AI** to the Worker as `AI` (the included `worker/wrangler.toml`
-already does this for CLI deploys) and each Telegram upload gets a short,
-non-explicit written caption in its `description` field. The agent uses the
-caption, file name, duration, dimensions and — by default — a high-level hint
-from the Telegram poster image. When the owner supplied no hashtags, the same
-model call also picks 2–6 tags from a fixed allow-list of site categories and
-format tags. It does not change the title or primary category, and it never
-replaces an owner-written description or hashtags.
+already does this for CLI deploys) and every eligible Telegram upload gets a
+fresh, short, non-explicit written caption with emojis plus 2–6 hashtags. The
+first Telegram caption line stays as the video title; any extra caption text or
+hashtags is only context for the model. Generated hashtags appear both at the
+end of the description (as `#hashtags`) and in the site's searchable tag list.
+URLs in the uploaded caption are removed before it is used or published. The
+agent uses the sanitized caption, file name, duration, dimensions and — by
+default — a high-level hint from the Telegram poster image.
 
 Link imports, drafts, duplicates and files above Telegram's 20 MB limit never
 call the model. If Workers AI is missing, disabled, slow or returns unusable
-output, the upload still publishes with a deterministic caption and tags derived
-from its metadata. The bot reports the generated caption and hashtags (or the
-fallback), `/caption` shows the agent's status, the feed carries
-`captionSource`/`hashtagSource`, and the admin Videos tab marks AI-written rows.
-The caption appears on the watch page and in video metadata. Full setup,
-privacy notes, configuration and failure states are in
-[docs/ai-caption-agent.md](docs/ai-caption-agent.md).
+output, the upload still publishes with deterministic fallback text and tags.
+The bot reports the generated caption and hashtags (or the fallback), `/caption`
+shows the agent's status, the feed carries `captionSource`/`hashtagSource`, and
+the admin Videos tab marks AI-written rows. The caption appears on the watch
+page and in video metadata. Full setup, privacy notes, configuration and failure
+states are in [docs/ai-caption-agent.md](docs/ai-caption-agent.md).
 
 ### View counting
 

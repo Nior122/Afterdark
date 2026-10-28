@@ -1,51 +1,59 @@
 # AI caption agent
 
 The Telegram bot Worker includes a bounded caption agent built on
-[Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/). It
-writes a **short, non-explicit text caption/description** for Telegram video
-uploads and, when the upload has no owner-supplied hashtags, generates hashtags
-too. It is **not** speech-to-text subtitles: nothing is timed to the audio and
-no WebVTT track is produced.
+[Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/). For
+every eligible Telegram video upload it writes a **fresh, short,
+non-explicit description with one or two emojis and 2–6 hashtags**, even if
+you supplied a caption or hashtags. The first caption line remains the video
+title; extra caption text and supplied hashtags are context only. URLs are
+stripped before caption text is used or published. This is **not**
+speech-to-text subtitles: nothing is timed to the audio and no WebVTT track is
+produced.
 
-The generated caption is stored in the video's `description` field, appears on
-the watch page and in video metadata, and is included in the public feed and
-admin API.
+The generated description includes hashtag text on its own line and is stored in
+the video's `description` field, so it appears on the watch page and in video
+metadata, the public feed and admin API. The hashtags are also stored in the
+searchable `tags` field.
 
 ## What it does
 
 For each eligible Telegram upload, the Worker:
 
-1. Reads the caption, title, file name, duration and pixel dimensions.
+1. Keeps the first caption line as the title, strips URLs from the caption, and
+   gathers the remaining caption text, file name, duration and pixel dimensions
+   as model context.
 2. Optionally downloads the Telegram poster image and asks a vision model for
    a short, non-explicit visual hint (setting, framing, orientation, lighting).
-3. Asks a text model for a caption of up to 280 characters and — when needed —
-   2–6 hashtags from a fixed vocabulary.
+3. Always asks the text model for a fresh caption (up to 280 characters) with
+   one or two emojis and 2–6 hashtags from a fixed vocabulary.
 4. Sanitises the caption, filters hashtags through the site's category/format
-   allow-list, removes duplicates, and saves both fields in KV.
+   allow-list, removes duplicates, appends hashtags to the description, and
+   saves the description/tags in KV.
 5. Exposes `captionSource` and `hashtagSource` on the feed/admin API so the
    dashboard can mark AI-written rows.
 
-### What the owner supplies still wins
+### How uploaded caption text is handled
 
-| Owner input | Agent behaviour |
+| Telegram input | Agent behaviour |
 | --- | --- |
-| Caption line 1 | Becomes the title, exactly as before. |
-| Extra caption lines | Become the owner description; no AI caption is generated. |
-| `#Hashtags` in the caption or file name | Become tags/category; no AI hashtags are generated. |
-| No description and no hashtags | The agent writes both. |
-| Owner description + owner hashtags | No model call at all. |
+| First caption line | Kept as the video title and used as model context. |
+| Extra caption lines | Used as context; the AI-generated description replaces them. |
+| `#Hashtags` in the caption or file name | Used as context/category evidence; AI hashtags replace them when AI succeeds. |
+| Link in caption (`https://…`, `www.…`, `t.me/…`) | URL is removed before title parsing, model input and publication; other words remain. |
+| Any new Telegram upload | Gets an AI-written caption and hashtag set (except duplicates, oversized files, or when the agent is off/unconfigured). |
 
-The primary category is **not** changed by the agent. AI hashtags still affect
-search and category browsing because `videoMatchesCategory()` also matches
-tags. Only new Telegram uploads are processed; existing KV records are not
-backfilled automatically.
+The primary category is inferred from the caption but is not changed by the
+agent. AI hashtags affect search and category browsing because
+`videoMatchesCategory()` also matches tags. Only new Telegram uploads are
+processed; existing KV records are not backfilled automatically.
 
 ## Inputs and privacy
 
 The agent never receives the bot token, a video file ID, viewer data, or the
-video/audio stream. The text model receives:
+video/audio stream. URLs are removed from uploaded caption text before the
+model sees it. The text model receives:
 
-- caption (max 500 characters),
+- sanitized caption (max 500 characters),
 - title and file name (max 180 characters each),
 - category, duration, resolution and orientation,
 - deterministic metadata tags,
@@ -116,12 +124,14 @@ Publishing never depends on AI. The Worker uses short timeouts and catches every
 model, network and parsing error. The bot confirmation shows the AI caption and
 hashtags it used, and says when any fallback text was substituted — including a
 partial success where the caption worked but no hashtags passed the allow-list.
+If the model is unavailable, owner-supplied hashtags may be retained as
+fallback tags, but the description still uses a neutral fallback caption.
 Both `captionSource` and `hashtagSource` can be:
 
 | Value | Meaning |
 | --- | --- |
 | `ai` | Model returned a usable caption / at least one allow-listed tag. |
-| `owner` | Owner supplied the description / hashtags; no model output used. |
+| `owner` | Owner-supplied hashtags were retained as fallback tags, or an older record used owner text. |
 | `fallback` | Model failed, timed out, or returned no usable output. |
 | `unconfigured` | No `AI` binding on this Worker. |
 | `disabled` | `CAPTION_AGENT=off` (or the legacy alias). |
@@ -130,23 +140,25 @@ Both `captionSource` and `hashtagSource` can be:
 | `legacy` | Video was stored before this feature existed. |
 
 Fallback captions are neutral catalogue lines such as
-`New Homemade clip · 1:14 · vertical. Added to AfterDark. Homemade · Telegram · Vertical Video.`
-Fallback tags always include the category and `Telegram` plus verifiable format
-tags.
+`🎬 New Homemade clip · 1:14 · vertical. Added to AfterDark.` followed by a
+line of hashtags such as `#Homemade #Telegram #Vertical_Video`. Fallback tags
+always include the category and `Telegram` plus verifiable format tags.
 
 ## Verify it
 
 Send `/caption` to the bot (or `/hashtags`, which is kept as an alias): it
 reports whether the `AI` binding is present, the text model in use, and whether
-the poster hint is enabled. A Telegram upload with no description and no
-hashtags should then produce `📝 AI caption:` and `🏷 AI hashtags:` lines in the
-bot reply. The caption is visible on the video's watch page.
+the poster hint is enabled. A new Telegram upload should produce
+`📝 AI caption:` and `🏷 AI hashtags:` lines even if the upload has caption text
+or hashtags. The first caption line stays the title; generated hashtags also
+appear at the end of the watch-page description.
 
 ```bash
 npm test
 ```
 
-The mocked Worker suite covers: AI captions and hashtags, owner text winning,
-admin API provenance, off switches and legacy aliases, model failure, missing
-binding, text-only mode, duplicates and oversized files. No Cloudflare account
+The mocked Worker suite covers: AI captions and hashtags generated from
+owner caption context, automatic URL removal, admin API provenance, off
+switches and legacy aliases, model failure, missing binding, text-only mode,
+duplicates and oversized files. No Cloudflare account
 or network access is needed for these tests.

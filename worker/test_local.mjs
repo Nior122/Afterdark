@@ -8,8 +8,8 @@
  * settings (mode, redirect, ads incl. per-slot enable and preview), view
  * counting with per-session dedupe, the bulk admin endpoints
  * (videos/bulk-delete, videos/bulk-patch, drafts/discard-all), and the mocked
- * Workers AI caption + hashtag agent (success, owner overrides, fallback,
- * off switches and skips).
+ * Workers AI caption + hashtag agent (success with owner context, URL removal,
+ * fallback, off switches and skips).
  */
 import worker from './worker.js'
 
@@ -744,7 +744,9 @@ async function main() {
     update.message.caption = caption
     return update
   }
-  const AI_CAPTION = 'A quiet vertical clip with an indoor hotel feel, now on AfterDark.'
+  const AI_CAPTION = '🎬 A quiet vertical clip with an indoor hotel feel, now on AfterDark. ✨'
+  const AI_HASHTAGS = ['POV', 'Amateur', 'Vertical Video']
+  const AI_DESCRIPTION = `${AI_CAPTION}\n\n#POV #Amateur #Vertical_Video`
   const aiCalls = []
   const aiRun = async (model, input) => {
     aiCalls.push({ model, input })
@@ -769,27 +771,44 @@ async function main() {
   await webhook(statusEnv, textMsg(111, '/caption'))
   check('/caption explains a missing binding', lastText().includes('unconfigured') && lastText().includes('AI'))
 
-  // Owner hashtags do not stop the AI caption, but they do stop AI hashtags.
+  // Owner text and hashtags are evidence only: every upload gets fresh AI
+  // caption/tags, while the first caption line remains its title.
   sentMessages = []
   await webhook(aiEnv, videoMsg(111, 'ai-owner-tags'))
-  const firstLlm = aiCalls.find((entry) => entry.model.includes('llama'))
-  check('owner hashtags still allow an AI caption', Boolean(firstLlm))
-  check('owner hashtags disable AI hashtag requests', JSON.stringify(firstLlm?.input || {}).includes('NEEDS_HASHTAGS=false'))
+  const firstLlm = aiCalls.findLast((entry) => entry.model.includes('llama'))
+  check('owner hashtags do not stop an AI caption', Boolean(firstLlm))
+  check('owner hashtags do not stop AI hashtag generation', Boolean(firstLlm) && !JSON.stringify(firstLlm.input || {}).includes('NEEDS_HASHTAGS=false'))
   const ownerTagged = (await feedOf(aiEnv))[0]
-  check('owner tags are preserved', ownerTagged.tags.includes('Big Ass') && ownerTagged.tags.includes('Telegram'))
-  check('AI caption written despite owner tags', ownerTagged.description === AI_CAPTION)
-  check('caption + hashtag provenance stored', ownerTagged.captionSource === 'ai' && ownerTagged.hashtagSource === 'owner')
+  check('AI caption is published with visible hashtags', ownerTagged.description === AI_DESCRIPTION)
+  check('AI tags replace user tags and include baseline', AI_HASHTAGS.every((tag) => ownerTagged.tags.includes(tag)) && ownerTagged.tags.includes('Telegram') && !ownerTagged.tags.includes('Big Ass'))
+  check('caption + hashtag provenance are AI', ownerTagged.captionSource === 'ai' && ownerTagged.hashtagSource === 'ai')
 
-  // Owner title + owner description + owner hashtags: no model call at all.
+  // Existing owner description/hashtags are not published verbatim; the first
+  // line remains the video title and all supplied text is available as context.
   const beforeOwner = aiCalls.length
   sentMessages = []
   await webhook(aiEnv, tagVideoMsg('ai-owner-both', 'Owner title\nOwner wrote this description line.\n#POV #Big_Ass', {
     file_name: 'owner-clip.mp4',
   }))
   const ownerBoth = (await feedOf(aiEnv))[0]
-  check('owner caption + hashtags skip the model', aiCalls.length === beforeOwner)
-  check('owner description preserved', ownerBoth.description === 'Owner wrote this description line.')
-  check('owner provenance for both fields', ownerBoth.captionSource === 'owner' && ownerBoth.hashtagSource === 'owner')
+  check('owner caption + hashtags still run the model', aiCalls.length > beforeOwner)
+  check('first owner caption line stays as title', ownerBoth.title === 'Owner title')
+  check('AI description replaces owner description and hashtags', ownerBoth.description === AI_DESCRIPTION && !ownerBoth.description.includes('Owner wrote this description'))
+  check('owner caption and tags are available as model context', JSON.stringify(aiCalls.at(-1)?.input || {}).includes('Owner wrote this description line') && JSON.stringify(aiCalls.at(-1)?.input || {}).includes('Big_Ass'))
+  check('AI provenance for both generated fields', ownerBoth.captionSource === 'ai' && ownerBoth.hashtagSource === 'ai')
+
+  // URLs in a Telegram caption are removed before title parsing, model input,
+  // and public display. The rest of the caption still serves as context.
+  sentMessages = []
+  await webhook(aiEnv, tagVideoMsg('ai-link-clean', 'Link test https://private.example/video\nExtra notes www.private.example/page #Big_Ass bare.private.example/secret', {
+    file_name: 'link-test.mp4',
+  }))
+  const linkClean = (await feedOf(aiEnv))[0]
+  const linkModelInput = JSON.stringify(aiCalls.findLast((entry) => entry.model.includes('llama'))?.input || {})
+  check('caption link removed from published title', linkClean.title === 'Link test')
+  check('caption link removed from AI description', !linkClean.description.includes('private.example'))
+  check('caption links removed from AI evidence', !linkModelInput.includes('private.example'))
+  check('caption body still triggers AI tags and caption', linkClean.captionSource === 'ai' && linkClean.hashtagSource === 'ai')
 
   // No owner description and no hashtags: the agent supplies both.
   sentMessages = []
@@ -802,18 +821,18 @@ async function main() {
   check('text model called', Boolean(llmCall))
   check('poster model called', aiCalls.some((entry) => entry.model.includes('llava')))
   check('poster hint passed to text model', JSON.stringify(llmCall?.input || {}).includes('indoor'))
-  check('AI caption reaches the feed', aiVideo.description === AI_CAPTION)
-  check('AI hashtags reach the feed', ['POV', 'Amateur', 'Vertical Video'].every((tag) => aiVideo.tags.includes(tag)))
+  check('AI caption and hashtags reach the feed', aiVideo.description === AI_DESCRIPTION)
+  check('AI hashtags reach the feed', AI_HASHTAGS.every((tag) => aiVideo.tags.includes(tag)) && aiVideo.description.includes('#POV #Amateur'))
   check('off-vocabulary hashtags are rejected', !aiVideo.tags.some((tag) => /NotAllowed|__proto__/.test(tag)))
   check('bot confirmation shows caption and hashtags', lastText().includes('AI caption') && lastText().includes('AI hashtags') && lastText().includes('#POV'))
   const aiStored = JSON.parse(await aiEnv.VIDEOS.get(`v:${aiVideo.id}`))
   check('AI provenance is stored', aiStored.captionAgent?.source === 'ai' && aiStored.hashtagAgent?.source === 'ai')
-  check('AI caption + tags are stored separately', aiStored.captionAgent?.generated === AI_CAPTION && aiStored.hashtagAgent?.generated.includes('POV'))
+  check('AI caption + tags are stored separately', aiStored.captionAgent?.generated === AI_CAPTION && aiStored.hashtagAgent?.generated.includes('POV') && aiStored.description === AI_DESCRIPTION)
   const aiAdminList = await (await call(aiEnv, 'https://worker.test/api/admin/videos', {
     headers: { Authorization: 'Bearer admin-secret' },
   })).json()
   const aiAdminVideo = aiAdminList.videos.find((entry) => entry.id === aiVideo.id)
-  check('admin API exposes caption provenance', aiAdminVideo?.captionSource === 'ai' && aiAdminVideo?.description === AI_CAPTION)
+  check('admin API exposes caption provenance', aiAdminVideo?.captionSource === 'ai' && aiAdminVideo?.description === AI_DESCRIPTION)
 
   const beforeDuplicate = aiCalls.length
   await webhook(aiEnv, tagVideoMsg('ai-no-tags', 'A quiet hotel room clip', {
@@ -831,6 +850,16 @@ async function main() {
   const brokenStored = JSON.parse(await brokenEnv.VIDEOS.get(`v:${brokenVideo.id}`))
   check('fallback provenance stored', brokenStored.captionAgent?.source === 'fallback' && brokenStored.hashtagAgent?.source === 'fallback')
   check('bot explains the fallback', lastText().includes('fallback caption'))
+
+  const noEmojiEnv = makeAiEnv(async (model) => model.includes('llava')
+    ? { description: 'A simple vertical indoor scene.' }
+    : { response: JSON.stringify({ caption: 'A simple vertical indoor scene.', hashtags: ['POV', 'Amateur'] }) })
+  await webhook(noEmojiEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(noEmojiEnv, tagVideoMsg('ai-emoji-enforced', 'Please describe this clip', { file_name: 'emoji-check.mp4' }))
+  const emojiVideo = (await feedOf(noEmojiEnv))[0]
+  check('AI caption always contains an emoji', emojiVideo.description.startsWith('🎬 A simple vertical indoor scene.'))
+  check('emoji-enforced caption still has hashtags', emojiVideo.description.includes('#POV #Amateur'))
 
   const noAiEnv = makeAiEnv(null)
   await webhook(noAiEnv, textMsg(111, '/start'))
@@ -872,7 +901,7 @@ async function main() {
   await webhook(textOnlyEnv, tagVideoMsg('ai-text-only', 'No tags', { file_name: 'clip.mp4' }))
   const textOnlyVideo = (await feedOf(textOnlyEnv))[0]
   check('poster model can be disabled', visionCalls === 0)
-  check('text-only agent still captions and tags', textOnlyVideo.description === 'Text-only caption.' && textOnlyVideo.tags.includes('POV'))
+  check('text-only agent still captions and tags', textOnlyVideo.description === '🎬 Text-only caption.\n\n#POV' && textOnlyVideo.tags.includes('POV'))
 
   let oversizeCalls = 0
   const oversizeEnv = makeAiEnv(async () => { oversizeCalls += 1; return { response: '{"caption":"x","hashtags":["POV"]}' } })
