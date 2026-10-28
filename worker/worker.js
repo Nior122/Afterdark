@@ -1343,7 +1343,13 @@ function firstMediaFileUrl(html, pageUrl) {
   const patterns = [
     new RegExp(`\\bfile["']?\\s*:\\s*["']([^"'\\)]+\\.${ext})["']`, 'i'),
     new RegExp(`\\b(?:src|url|video_url|mp4)\\s*[:=]\\s*["']([^"'\\)]+\\.${ext})["']`, 'i'),
+    // Lazy-loaders hide the file in a data- attribute until the play click.
+    new RegExp(`data-(?:file|src|video|url)\\s*=\\s*["']([^"'\\)]+\\.${ext})["']`, 'i'),
     new RegExp(`["'](https?:\\/\\/[^"'\\)]+\\.${ext})["']`, 'i'),
+    // Protocol-relative and site-relative files in configs/attributes
+    // (`//cdn.test/x.mp4` and `/wp/uploads/x.mp4` — the leading slash covers
+    // both; resolved against the page URL below).
+    new RegExp(`["'](\\/[^"'\\s]*?\\.(?:mp4|webm|m4v|ogv)(?:\\?[^"'\\s]*)?)["']`, 'i'),
   ]
   for (const pattern of patterns) {
     const match = pattern.exec(html)
@@ -1421,7 +1427,10 @@ function inferCategory(...hints) {
 }
 
 function cleanTitle(value) {
-  return stripTags(value)
+  // decodeEntities is idempotent on plain text (only valid `&name;`/`&#nnn;`
+  // sequences change), so titles arriving from raw <title>/<a> markup — which
+  // never went through metaContent's decode — cannot ship "&amp;" to viewers.
+  return decodeEntities(stripTags(value))
     .replace(/\s*[|–—·]\s*(free\s+)?(hd\s+)?(porn|sex|tube|videos?)\s*$/i, '')
     .replace(/\s+/g, ' ')
     .trim()
