@@ -32,6 +32,10 @@ interface FeedVideo {
   thumbUrl?: string | null
   description?: string
   site?: string
+  /** Where the Worker got its description: ai, owner, fallback, disabled, legacy… */
+  captionSource?: string
+  /** Where the Worker got its tags: ai, owner, fallback, disabled, legacy… */
+  hashtagSource?: string
   /** Real view count from the Worker (0 until the first view is reported). */
   views?: number
   /** Media pixel dimensions, when known — height > width renders the card portrait. */
@@ -87,6 +91,8 @@ export function mapFeedVideo(v: FeedVideo): Video {
     videoUrl: v.streamUrl || v.sourceUrl,
     description,
     tags: v.tags?.length ? v.tags : [category, 'Telegram'],
+    captionSource: v.captionSource,
+    hashtagSource: v.hashtagSource,
     // Link videos are third-party pages/players: keep them click-shielded so a
     // viewer cannot be navigated off the site by the embedded player.
     protectedEmbed: Boolean(v.sourceUrl),

@@ -156,7 +156,8 @@ What the bot does:
 
 | Feature | How |
 | --- | --- |
-| Publish a forwarded video | Caption line 1 = title, `#Hashtags` = tags/category; published immediately |
+| Publish a forwarded video | Caption line 1 = title, extra lines = description, `#Hashtags` = tags/category; published immediately |
+| **AI caption agent** | Cloudflare Workers AI writes a short, non-explicit description when the owner supplied none and suggests 2–6 hashtags when none were supplied. Owner text and tags are never overwritten; scraped links and >20 MB files are skipped. Deterministic fallback caption/tags are used if the model or binding is unavailable — see [docs/ai-caption-agent.md](docs/ai-caption-agent.md) |
 | **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
@@ -164,6 +165,27 @@ What the bot does:
 | Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
 | **Switch site mode** | `/mode` — public catalogue ⇄ direct links only, applied live |
 | **Admin dashboard** | `/admin/` does the same jobs in a web page, and more: mode switch, home-page redirect, ad slots (per-slot enable + preview outlines), search/filter/sort, bulk delete/recategorise, bulk link scraping, review/publish drafts, rebuild the site. Works in **both** modes |
+
+### Automatic AI captions
+
+Bind **Workers AI** to the Worker as `AI` (the included `worker/wrangler.toml`
+already does this for CLI deploys) and each Telegram upload gets a short,
+non-explicit written caption in its `description` field. The agent uses the
+caption, file name, duration, dimensions and — by default — a high-level hint
+from the Telegram poster image. When the owner supplied no hashtags, the same
+model call also picks 2–6 tags from a fixed allow-list of site categories and
+format tags. It does not change the title or primary category, and it never
+replaces an owner-written description or hashtags.
+
+Link imports, drafts, duplicates and files above Telegram's 20 MB limit never
+call the model. If Workers AI is missing, disabled, slow or returns unusable
+output, the upload still publishes with a deterministic caption and tags derived
+from its metadata. The bot reports the generated caption and hashtags (or the
+fallback), `/caption` shows the agent's status, the feed carries
+`captionSource`/`hashtagSource`, and the admin Videos tab marks AI-written rows.
+The caption appears on the watch page and in video metadata. Full setup,
+privacy notes, configuration and failure states are in
+[docs/ai-caption-agent.md](docs/ai-caption-agent.md).
 
 ### View counting
 
@@ -269,7 +291,7 @@ scripts/
   verify.mjs          checks the built HTML against the indexing rules
   verify:dom          mounts the app in jsdom (needs `npm i --no-save jsdom`)
 functions/_middleware.ts  Pages middleware: direct-mode 302, new-video fallback
-worker/               Cloudflare Worker: Telegram bot, feed, drafts, admin API, mode, redirect, ads
+worker/               Cloudflare Worker: Telegram bot, AI caption + hashtag agent, feed, drafts, admin API, mode, redirect, ads
 ```
 
 ## Troubleshooting: black screen
@@ -426,7 +448,8 @@ npm run build          # tsc -b + vite build
 npm run preview        # serve dist/ at http://localhost:4173
 ```
 
-- No environment variables, API keys, database or object storage are required.
+- No environment variables, API keys, database or object storage are required for the static site.
+  The optional Telegram Worker uses KV and, for automatic captions/hashtags, a Workers AI binding named `AI`.
 - Videos added in the UI are stored per-browser in `localStorage`; deployments start with the 4
   seeded link-only videos on a fresh browser. Saved/liked/history IDs for removed catalogue videos are
   filtered out on load, removed channel subscriptions are dropped, and any legacy non-adult

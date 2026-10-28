@@ -28,6 +28,10 @@ export interface Video {
   description?: string
   /** Searchable tags/keywords, rendered as chips on the watch page. */
   tags?: string[]
+  /** Provenance from the Worker's caption agent: ai, owner, fallback, etc. */
+  captionSource?: string
+  /** Provenance of the Worker's hashtags: ai, owner, fallback, etc. */
+  hashtagSource?: string
   /**
    * Render the embed behind a click shield (poster facade + shielded
    * title-bar link + sandbox without top-navigation/popups) and hide the

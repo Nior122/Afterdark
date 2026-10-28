@@ -10,3 +10,19 @@ compatibility_date = "2025-01-01"
 [[kv_namespaces]]
 binding = "VIDEOS"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# Optional but recommended: the AI caption + hashtag agent for Telegram
+# uploads. No API key is needed — Workers AI authenticates the binding itself.
+# Without it, uploads still publish with a deterministic caption and tags.
+[ai]
+binding = "AI"
+
+# All optional. Set CAPTION_AGENT to "off" to disable the agent, or
+# CAPTION_AGENT_VISION_MODEL to "off" to keep it text-only. Cloudflare rotates
+# model ids; override either model here instead of editing worker.js.
+[vars]
+CAPTION_AGENT = "on"
+# CAPTION_AGENT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# CAPTION_AGENT_VISION_MODEL = "@cf/llava-hf/llava-1.5-7b-hf"
+# Legacy aliases HASHTAG_AGENT / HASHTAG_AGENT_MODEL / HASHTAG_AGENT_VISION_MODEL
+# are still accepted by worker.js.

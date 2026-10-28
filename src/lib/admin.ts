@@ -26,6 +26,10 @@ export interface AdminVideo {
   thumbUrl: string | null
   description: string
   site?: string
+  /** Provenance of the description on Telegram uploads (ai, owner, fallback, …). */
+  captionSource?: string
+  /** Provenance of the tags on Telegram uploads (ai, owner, fallback, …). */
+  hashtagSource?: string
   createdAt: number | null
   updatedAt: number | null
 }

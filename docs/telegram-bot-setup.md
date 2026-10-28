@@ -2,7 +2,8 @@
 
 Once set up, publishing a video is just this: **forward (or send) the video to
 your Telegram bot → it appears on the website** with its real thumbnail, title
-from the caption and category from a hashtag.
+from the caption, an AI-written description when you did not supply one, and
+AI-suggested tags when you supply no hashtags.
 
 How it works, in one line:
 
@@ -47,6 +48,24 @@ How it works, in one line:
 2. Open your Worker → **Settings → Bindings → Add → KV namespace**.
 3. Set **Variable name** to exactly `VIDEOS`, pick the namespace you just
    created, and **Deploy**.
+
+## Step 3b — Enable automatic AI captions (optional)
+
+The Worker works without this step; uploads get a deterministic fallback
+caption and tags. To let the AI agent write a short description and suggest
+missing hashtags:
+
+1. In your Worker go to **Settings → Bindings → Add → Workers AI**
+   (some dashboards call it an **AI binding**).
+2. Set **Variable name** to exactly `AI` and **Deploy**. No API key is needed.
+3. Optional variables under **Settings → Variables and Secrets**:
+   `CAPTION_AGENT=off` disables the agent, and
+   `CAPTION_AGENT_VISION_MODEL=off` keeps it text-only. Model IDs can also be
+   overridden there; see [ai-caption-agent.md](ai-caption-agent.md).
+
+Workers AI usage counts against your Cloudflare account's allocation. The agent
+sends only text metadata and — unless disabled — the Telegram poster image to
+Cloudflare; it never sends the bot token, viewer data or the video/audio stream.
 
 ## Step 4 — Add the secrets
 
@@ -116,10 +135,18 @@ automatically (give it up to a minute for caches).
 Forward/send a video to the bot — it is published immediately, exactly as before.
 
 - First line of the caption = **title**
+- Extra caption lines = **description**; the AI will not replace them.
 - `#Hashtags` = **tags**; one matching a site category sets the
   **category** — use underscores for multi-word ones: `#POV`, `#MILF`,
   `#Big_Ass`, `#Big_Tits`, `#4K_Ultra_HD`. No match → `Homemade`.
 - No caption → the file name becomes the title.
+- **No description** → the AI agent writes a short, non-explicit caption. It
+  appears on the watch page; the bot reply shows it as `📝 AI caption: …`.
+- **No hashtags** → the same agent suggests 2–6 allow-listed site tags. The bot
+  reply shows them as `🏷 AI hashtags: #POV #Amateur`. Owner text and tags are
+  never replaced; if Workers AI is unavailable the video still publishes with
+  a fallback caption and tags. See
+  [ai-caption-agent.md](ai-caption-agent.md) for setup and privacy details.
 
 ### Publish from a link (scrape → review → confirm)
 Paste a link (or `/add <link>`) and the bot scrapes the page:
@@ -176,6 +203,7 @@ you want. Both modes keep every link working.
 | `/redirect <url>` | In direct mode, send the home page (and every non-video URL) to that address with a real 302. `/redirect off` clears it, `/redirect` shows the current value |
 | `/ads on` · `/ads off` | Switch the site's ad slots on or off; the status line also lists slots hidden by their per-slot switch. The code itself, the per-slot switches and preview outlines live in the dashboard's **Ads** tab |
 | `/pending` | Drafts still waiting for review |
+| `/caption` (`/hashtags` also works) | Show whether the AI caption agent is configured and which model it uses |
 | `/cancel` | Abort a pending “send me the new title” step |
 | `/id` | Show your Telegram user ID (useful below) |
 

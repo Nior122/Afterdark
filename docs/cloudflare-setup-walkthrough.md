@@ -11,9 +11,13 @@ Telegram bot  ──►  Cloudflare Worker  ◄──  the website (GitHub Pages
  (you send          (stores video ids,      (reads the Worker's feed,
   videos here)       serves the feed,        and asks it which site mode
                      runs the dashboard)     is on)
+                            │
+                            └──► Workers AI (optional caption agent)
 ```
 
-Nothing is installed on your computer. Everything happens in a browser.
+Nothing is installed on your computer. Everything happens in a browser. The
+Workers AI branch is optional: without it, videos still publish with a simple
+fallback caption and tags derived from their metadata.
 
 **Time:** about 15 minutes the first time.
 **Cost:** nothing (Cloudflare's free tier covers this many times over).
@@ -41,8 +45,8 @@ Nothing is installed on your computer. Everything happens in a browser.
 
 Nothing gets recreated. The Worker is the same Worker, the KV namespace is the
 same namespace, the bot token and webhook stay exactly as they are — you are
-only replacing the code inside it and adding one new secret. **Five minutes,
-three steps.**
+only replacing the code inside it, adding one secret and (optionally) turning
+on Workers AI. **Five minutes, four steps.**
 
 1. Cloudflare → **Workers & Pages** → click your existing worker (e.g.
    `afterdark-bot`).
@@ -52,6 +56,10 @@ three steps.**
 3. **Settings** → **Variables and Secrets** → **Add** → **Secret** →
    `ADMIN_TOKEN` = a long random string you invent (this is the dashboard
    password) → **Deploy**.
+4. **Optional — automatic captions:** **Settings → Bindings → Add → Workers
+   AI**, variable name exactly `AI`, then **Deploy**. No API key is needed.
+   Skip this and uploads still publish with a fallback caption and tags.
+   Details: [ai-caption-agent.md](ai-caption-agent.md).
 
 Then check it worked:
 
@@ -143,6 +151,29 @@ categories) in Cloudflare **KV**.
 
 ✅ **Checkpoint:** the Worker's **Settings → Bindings** list now shows
 `VIDEOS → afterdark-videos`.
+
+---
+
+## Part 3b — Turn on AI captions (optional, one more binding)
+
+The site and bot work perfectly without this. With it, Telegram videos you send
+get a short AI-written description when you did not write one, and 2–6
+AI-suggested hashtags when you supplied none.
+
+1. Still in your Worker → **Settings → Bindings → Add**.
+2. Choose **Workers AI** (or **AI binding**). Set **Variable name** to exactly
+   `AI`.
+3. Click **Save** / **Deploy**.
+
+✅ **Checkpoint:** **Settings → Bindings** now lists both `VIDEOS` and `AI`.
+Send `/caption` to the bot; it should answer `Status: on` with the model name.
+Then send a video with no description and no `#hashtags`; the reply contains
+`📝 AI caption:` and `🏷 AI hashtags:` lines. If Workers AI is unavailable, the
+reply says it used fallback text instead — publishing is never blocked.
+
+No API key is needed. Workers AI has its own account-level usage allocation;
+see [ai-caption-agent.md](ai-caption-agent.md) to switch the agent off, make it
+text-only, or change model IDs.
 
 ---
 
@@ -292,6 +323,9 @@ should see **Owner sign-in**.
 | Mode switch flips, but the site keeps showing the catalogue | The site build has no `VITE_TELEGRAM_FEED_URL` (Part 7), or you're looking at a cached tab — reload it |
 | New video is missing from `sitemap.xml` | Sitemaps are rebuilt at build time. Press **Rebuild site** in the dashboard (Part 4 GitHub secrets needed) or re-run the deploy workflow |
 | "Too large" when forwarding a video | Telegram bots cannot download files over 20 MB. Compress it, or post a `t.me` link instead |
+| Bot says "used a safe fallback caption and tags" | The `AI` binding is missing, the model timed out, or Workers AI quota was reached. The video is still published with neutral text. Check Part 3b and [ai-caption-agent.md](ai-caption-agent.md) |
+| No `📝 AI caption` line on a new upload | You wrote extra caption lines (so your description was kept), the upload was a duplicate, or `CAPTION_AGENT=off`. Owner text is intentionally never replaced |
+| No `🏷 AI hashtags` line on a new upload | You supplied hashtags, the upload was a duplicate, or `CAPTION_AGENT=off`. Owner hashtags are intentionally never replaced |
 
 ---
 
@@ -301,8 +335,9 @@ should see **Owner sign-in**.
 2. After changing a binding, secret, or variable on the Worker, click
    **Deploy** again. Changes without a deploy are not live.
 3. The KV binding name must be exactly `VIDEOS`.
-4. The site variable is the Worker **origin** only — no path, no slash.
-5. `ADMIN_TOKEN` and `WEBHOOK_SECRET` must be different strings.
+4. The optional Workers AI binding name must be exactly `AI`.
+5. The site variable is the Worker **origin** only — no path, no slash.
+6. `ADMIN_TOKEN` and `WEBHOOK_SECRET` must be different strings.
 
 ---
 

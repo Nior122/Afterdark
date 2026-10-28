@@ -1069,6 +1069,16 @@ function VideoManager({
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted">
                   <span className="rounded bg-raise px-1.5 py-0.5 font-mono text-[10.5px]">{video.id}</span>
                   <span>{video.kind === 'link' ? 'link' : 'telegram'}</span>
+                  {video.captionSource === 'ai' && (
+                    <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700">
+                      AI caption
+                    </span>
+                  )}
+                  {video.hashtagSource === 'ai' && (
+                    <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700">
+                      AI tags
+                    </span>
+                  )}
                   {video.durationSec ? <span>{formatDuration(video.durationSec)}</span> : null}
                   <span className="inline-flex items-center gap-1">
                     <Eye size={11} />

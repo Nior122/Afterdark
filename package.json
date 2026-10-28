@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/prerender.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "verify": "node scripts/verify.mjs",
+    "test": "node worker/test_local.mjs",
     "preview:static": "node scripts/serve-dist.mjs",
     "verify:render": "node scripts/render-check.mjs",
     "verify:dom": "node scripts/verify-dom.cjs",

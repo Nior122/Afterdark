@@ -6,8 +6,10 @@
  * galleries into drafts (with duplicate detection for the bulk scrape),
  * review/publish/cancel, rename, full list, paging and delete, the site
  * settings (mode, redirect, ads incl. per-slot enable and preview), view
- * counting with per-session dedupe, and the bulk admin endpoints
- * (videos/bulk-delete, videos/bulk-patch, drafts/discard-all).
+ * counting with per-session dedupe, the bulk admin endpoints
+ * (videos/bulk-delete, videos/bulk-patch, drafts/discard-all), and the mocked
+ * Workers AI caption + hashtag agent (success, owner overrides, fallback,
+ * off switches and skips).
  */
 import worker from './worker.js'
 
@@ -726,6 +728,164 @@ async function main() {
   const rebuild = await admin('rebuild', { method: 'POST', headers: auth, body: '{}' })
   check('rebuild explains it is not configured', rebuild.status === 503)
   check('CORS preflight allowed', (await call(adminEnv, 'https://worker.test/api/admin/settings', { method: 'OPTIONS' })).status === 204)
+
+  console.log('— AI caption + hashtag agent')
+  const makeAiEnv = (run) => ({
+    BOT_TOKEN: TOKEN,
+    WEBHOOK_SECRET: SECRET,
+    VIDEOS: new MockKV(),
+    ADMIN_TOKEN: 'admin-secret',
+    ...(run ? { AI: { run } } : {}),
+  })
+  // The shared videoMsg helper applies `over` to the Telegram video object;
+  // this wrapper changes the message caption (where hashtags live) separately.
+  const tagVideoMsg = (uniq, caption, over = {}) => {
+    const update = videoMsg(111, uniq, over)
+    update.message.caption = caption
+    return update
+  }
+  const AI_CAPTION = 'A quiet vertical clip with an indoor hotel feel, now on AfterDark.'
+  const aiCalls = []
+  const aiRun = async (model, input) => {
+    aiCalls.push({ model, input })
+    if (model.includes('llava')) return { description: 'A vertical indoor clip with one person.' }
+    return {
+      response: JSON.stringify({
+        caption: AI_CAPTION,
+        hashtags: ['POV', '#Amateur', 'Vertical Video', 'NotAllowed', '__proto__'],
+      }),
+    }
+  }
+  const aiEnv = makeAiEnv(aiRun)
+  await webhook(aiEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(aiEnv, textMsg(111, '/caption'))
+  check('/caption reports the configured model', lastText().includes('Status: on') && lastText().includes('llama-3.3'))
+  await webhook(aiEnv, textMsg(111, '/hashtags'))
+  check('/hashtags remains a status alias', lastText().includes('AI caption agent'))
+  const statusEnv = makeAiEnv(null)
+  await webhook(statusEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(statusEnv, textMsg(111, '/caption'))
+  check('/caption explains a missing binding', lastText().includes('unconfigured') && lastText().includes('AI'))
+
+  // Owner hashtags do not stop the AI caption, but they do stop AI hashtags.
+  sentMessages = []
+  await webhook(aiEnv, videoMsg(111, 'ai-owner-tags'))
+  const firstLlm = aiCalls.find((entry) => entry.model.includes('llama'))
+  check('owner hashtags still allow an AI caption', Boolean(firstLlm))
+  check('owner hashtags disable AI hashtag requests', JSON.stringify(firstLlm?.input || {}).includes('NEEDS_HASHTAGS=false'))
+  const ownerTagged = (await feedOf(aiEnv))[0]
+  check('owner tags are preserved', ownerTagged.tags.includes('Big Ass') && ownerTagged.tags.includes('Telegram'))
+  check('AI caption written despite owner tags', ownerTagged.description === AI_CAPTION)
+  check('caption + hashtag provenance stored', ownerTagged.captionSource === 'ai' && ownerTagged.hashtagSource === 'owner')
+
+  // Owner title + owner description + owner hashtags: no model call at all.
+  const beforeOwner = aiCalls.length
+  sentMessages = []
+  await webhook(aiEnv, tagVideoMsg('ai-owner-both', 'Owner title\nOwner wrote this description line.\n#POV #Big_Ass', {
+    file_name: 'owner-clip.mp4',
+  }))
+  const ownerBoth = (await feedOf(aiEnv))[0]
+  check('owner caption + hashtags skip the model', aiCalls.length === beforeOwner)
+  check('owner description preserved', ownerBoth.description === 'Owner wrote this description line.')
+  check('owner provenance for both fields', ownerBoth.captionSource === 'owner' && ownerBoth.hashtagSource === 'owner')
+
+  // No owner description and no hashtags: the agent supplies both.
+  sentMessages = []
+  await webhook(aiEnv, tagVideoMsg('ai-no-tags', 'A quiet hotel room clip', {
+    file_name: 'hotel-pov-clip.mp4',
+  }))
+  const aiVideo = (await feedOf(aiEnv))[0]
+  const llmCall = aiCalls.findLast((entry) => entry.model.includes('llama'))
+  check('hashtag-less upload still publishes', aiVideo && lastText().includes('Posted to the website'))
+  check('text model called', Boolean(llmCall))
+  check('poster model called', aiCalls.some((entry) => entry.model.includes('llava')))
+  check('poster hint passed to text model', JSON.stringify(llmCall?.input || {}).includes('indoor'))
+  check('AI caption reaches the feed', aiVideo.description === AI_CAPTION)
+  check('AI hashtags reach the feed', ['POV', 'Amateur', 'Vertical Video'].every((tag) => aiVideo.tags.includes(tag)))
+  check('off-vocabulary hashtags are rejected', !aiVideo.tags.some((tag) => /NotAllowed|__proto__/.test(tag)))
+  check('bot confirmation shows caption and hashtags', lastText().includes('AI caption') && lastText().includes('AI hashtags') && lastText().includes('#POV'))
+  const aiStored = JSON.parse(await aiEnv.VIDEOS.get(`v:${aiVideo.id}`))
+  check('AI provenance is stored', aiStored.captionAgent?.source === 'ai' && aiStored.hashtagAgent?.source === 'ai')
+  check('AI caption + tags are stored separately', aiStored.captionAgent?.generated === AI_CAPTION && aiStored.hashtagAgent?.generated.includes('POV'))
+  const aiAdminList = await (await call(aiEnv, 'https://worker.test/api/admin/videos', {
+    headers: { Authorization: 'Bearer admin-secret' },
+  })).json()
+  const aiAdminVideo = aiAdminList.videos.find((entry) => entry.id === aiVideo.id)
+  check('admin API exposes caption provenance', aiAdminVideo?.captionSource === 'ai' && aiAdminVideo?.description === AI_CAPTION)
+
+  const beforeDuplicate = aiCalls.length
+  await webhook(aiEnv, tagVideoMsg('ai-no-tags', 'A quiet hotel room clip', {
+    file_name: 'hotel-pov-clip.mp4',
+  }))
+  check('duplicate upload does not re-run the agent', aiCalls.length === beforeDuplicate)
+
+  const brokenEnv = makeAiEnv(async () => { throw new Error('Workers AI down') })
+  await webhook(brokenEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(brokenEnv, tagVideoMsg('ai-broken', 'No tags here', { file_name: 'clip.mp4' }))
+  const brokenVideo = (await feedOf(brokenEnv))[0]
+  check('AI failure still publishes', brokenVideo && lastText().includes('Posted to the website'))
+  check('fallback caption + tags saved', brokenVideo.description.includes('New Homemade clip') && brokenVideo.tags.includes('Telegram'))
+  const brokenStored = JSON.parse(await brokenEnv.VIDEOS.get(`v:${brokenVideo.id}`))
+  check('fallback provenance stored', brokenStored.captionAgent?.source === 'fallback' && brokenStored.hashtagAgent?.source === 'fallback')
+  check('bot explains the fallback', lastText().includes('fallback caption'))
+
+  const noAiEnv = makeAiEnv(null)
+  await webhook(noAiEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(noAiEnv, tagVideoMsg('no-ai-binding', 'No tags', { file_name: 'clip.mp4' }))
+  const noAiVideo = (await feedOf(noAiEnv))[0]
+  check('missing AI binding still publishes', noAiVideo && lastText().includes('Posted to the website'))
+  check('unconfigured caption exists', noAiVideo.description.includes('Added to AfterDark'))
+  const noAiStored = JSON.parse(await noAiEnv.VIDEOS.get(`v:${noAiVideo.id}`))
+  check('unconfigured provenance stored', noAiStored.captionAgent?.source === 'unconfigured' && noAiStored.hashtagAgent?.source === 'unconfigured')
+
+  let offCalls = 0
+  const offEnv = makeAiEnv(async () => { offCalls += 1; return { response: '{"caption":"x","hashtags":["POV"]}' } })
+  offEnv.CAPTION_AGENT = 'off'
+  await webhook(offEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(offEnv, tagVideoMsg('ai-off', 'No tags', { file_name: 'clip.mp4' }))
+  const offVideo = (await feedOf(offEnv))[0]
+  check('off switch skips every model call', offCalls === 0)
+  check('off switch still writes a caption', offVideo.description.includes('New Homemade clip'))
+  const offStored = JSON.parse(await offEnv.VIDEOS.get(`v:${offVideo.id}`))
+  check('disabled provenance stored', offStored.captionAgent?.source === 'disabled' && offStored.hashtagAgent?.source === 'disabled')
+
+  let legacyOffCalls = 0
+  const legacyOffEnv = makeAiEnv(async () => { legacyOffCalls += 1; return { response: '{"caption":"x","hashtags":["POV"]}' } })
+  legacyOffEnv.HASHTAG_AGENT = 'off'
+  await webhook(legacyOffEnv, textMsg(111, '/start'))
+  await webhook(legacyOffEnv, tagVideoMsg('legacy-off', 'No tags', { file_name: 'clip.mp4' }))
+  check('legacy HASHTAG_AGENT=off alias still works', legacyOffCalls === 0)
+
+  let visionCalls = 0
+  const textOnlyEnv = makeAiEnv(async (model) => {
+    if (model.includes('llava')) visionCalls += 1
+    return { response: JSON.stringify({ caption: 'Text-only caption.', hashtags: ['POV'] }) }
+  })
+  textOnlyEnv.CAPTION_AGENT_VISION_MODEL = 'off'
+  await webhook(textOnlyEnv, textMsg(111, '/start'))
+  sentMessages = []
+  await webhook(textOnlyEnv, tagVideoMsg('ai-text-only', 'No tags', { file_name: 'clip.mp4' }))
+  const textOnlyVideo = (await feedOf(textOnlyEnv))[0]
+  check('poster model can be disabled', visionCalls === 0)
+  check('text-only agent still captions and tags', textOnlyVideo.description === 'Text-only caption.' && textOnlyVideo.tags.includes('POV'))
+
+  let oversizeCalls = 0
+  const oversizeEnv = makeAiEnv(async () => { oversizeCalls += 1; return { response: '{"caption":"x","hashtags":["POV"]}' } })
+  await webhook(oversizeEnv, textMsg(111, '/start'))
+  await webhook(oversizeEnv, tagVideoMsg('ai-oversize', 'No tags', {
+    file_name: 'clip.mp4', file_size: 25 * 1048576,
+  }))
+  check('oversized Telegram file skips the agent', oversizeCalls === 0)
+  const oversizeStored = [...oversizeEnv.VIDEOS.map.values()]
+    .map((raw) => { try { return JSON.parse(raw) } catch { return null } })
+    .find((record) => record?.id?.startsWith('tg-'))
+  check('oversized file gets a fallback caption', oversizeStored?.description?.includes('New Homemade clip'))
+  check('oversized file provenance is skipped', oversizeStored?.captionAgent?.source === 'skipped' && oversizeStored?.hashtagAgent?.source === 'skipped')
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
