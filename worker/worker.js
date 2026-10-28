@@ -1331,6 +1331,35 @@ function telegramPostMeta(html) {
   return out
 }
 
+/**
+ * Direct media URL hidden in a JS player config or attribute. The common
+ * shape on WordPress video blogs (Fluid Player, jwplayer, VPD …): no
+ * og:video meta and no <video src> tag — the file lives in a script config
+ * like `sources: [{ file: "…/clip.mp4" }]`. Relative URLs resolve against
+ * the page. First sane hit wins; the page URL itself is never returned.
+ */
+function firstMediaFileUrl(html, pageUrl) {
+  const ext = '(?:mp4|webm|m4v|ogv)(?:\\?[^"\'\\)\\s]*)?'
+  const patterns = [
+    new RegExp(`\\bfile["']?\\s*:\\s*["']([^"'\\)]+\\.${ext})["']`, 'i'),
+    new RegExp(`\\b(?:src|url|video_url|mp4)\\s*[:=]\\s*["']([^"'\\)]+\\.${ext})["']`, 'i'),
+    new RegExp(`["'](https?:\\/\\/[^"'\\)]+\\.${ext})["']`, 'i'),
+  ]
+  for (const pattern of patterns) {
+    const match = pattern.exec(html)
+    if (!match) continue
+    let absolute
+    try {
+      absolute = new URL(decodeEntities(match[1]), pageUrl).toString()
+    } catch {
+      continue
+    }
+    if (absolute === pageUrl || absolute.startsWith(`${pageUrl}#`)) continue
+    return absolute
+  }
+  return ''
+}
+
 /** Playable source for a scraped item: direct file, or an embeddable player. */
 function pickSourceUrl(candidates) {
   for (const candidate of candidates) {
@@ -1550,6 +1579,8 @@ function scrapePage(html, pageUrl) {
       /<video\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
       /<source\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
       /<iframe\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
+      // JS-configured players keep the file in a script object, not a tag.
+      firstMediaFileUrl(html, pageUrl),
     ])
     push({
       title: pageTitle,

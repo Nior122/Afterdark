@@ -226,6 +226,14 @@ export default function WatchPage() {
                     ? 'This link cannot be embedded here. Open it on the original site to watch.'
                     : 'This demo video has no source attached yet. Add a video with your own link to play it here.'}
                 </p>
+                {source.kind === 'page' && video.id.startsWith('u-') && (
+                  <p className="mt-1.5 max-w-md text-[12px] leading-relaxed text-white/45">
+                    Links added from the Create dialog are saved in this browser only. To publish a
+                    playable copy for everyone, send the page link to your Telegram bot (or the
+                    dashboard’s Scrape panel) — the import pulls the actual video file off the page
+                    so it plays right here.
+                  </p>
+                )}
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                   {source.kind === 'page' && video.videoUrl && (
                     <a

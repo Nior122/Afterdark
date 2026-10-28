@@ -53,6 +53,19 @@ const TME_POST_PAGE = `<!doctype html><html><head>
 <div class="tgme_widget_message_footer"><span>600 views</span></div>
 </div></body></html>`
 
+// WordPress-style page with a JS-configured player: no og:video, no <video>
+// tag — the file lives inside a fluidPlayer() config object only.
+const FLUID_PAGE = `<!doctype html><html><head>
+<meta property="og:site_name" content="BlogTube" />
+<meta property="og:title" content="Trending Clip XXX video" />
+<meta property="og:image" content="https://blog.test/wp/uploads/clip-400x225.jpg" />
+<script>
+  fluidPlayer("mvp-flash-player", {
+    media: { sources: [{ file: "https://videos.blog.test/wp/uploads/2026/08/Trending-Clip.mp4" }], image: "https://blog.test/wp/uploads/clip-400x225.jpg" },
+  });
+</script>
+</head><body><div id="mvp-flash-player"></div></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -123,6 +136,9 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://t.me/testchannel/1343') {
     return new Response(TME_POST_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://blog.test/trending-clip') {
+    return new Response(FLUID_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   if (u === 'https://sometube.test/latest') {
     return new Response(GALLERY_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -280,6 +296,20 @@ async function main() {
   check('t.me duration scraped to seconds', tmeVideo.durationSec === 2465, JSON.stringify(tmeVideo.durationSec))
   check('t.me portrait aspect recorded', tmeVideo.width === 400 && tmeVideo.height === 711, JSON.stringify({ w: tmeVideo.width, h: tmeVideo.height }))
   check('t.me post link kept as source', tmeVideo.sourceUrl === 'https://t.me/testchannel/1343', JSON.stringify(tmeVideo.sourceUrl))
+
+  console.log('— scraping: JS-player config page (file only in script, no tags)')
+  sentMessages = []
+  await webhook(env, textMsg(111, 'https://blog.test/trending-clip'))
+  check('fluid page draft carries the title', lastText().includes('Trending Clip'), lastText())
+  const fluidId = /id: (d[a-z0-9]+)/.exec(lastText())[1]
+  await webhook(env, callback(111, `p:${fluidId}`))
+  feed = await feedOf(env)
+  const fluidVideo = feed.find((x) => x.title?.includes('Trending Clip')) || {}
+  check(
+    'js-config mp4 becomes the playable source',
+    fluidVideo.sourceUrl === 'https://videos.blog.test/wp/uploads/2026/08/Trending-Clip.mp4',
+    JSON.stringify(fluidVideo).slice(0, 200),
+  )
 
   console.log('— scraping: JSON-LD single video')
   sentMessages = []
