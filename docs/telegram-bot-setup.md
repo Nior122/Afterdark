@@ -1,8 +1,9 @@
 # Telegram bot setup — post videos to AfterDark by forwarding them to a bot
 
 Once set up, publishing a video is just this: **forward (or send) the video to
-your Telegram bot → it appears on the website** with its real thumbnail, title
-from the caption and category from a hashtag.
+your Telegram bot → it appears on the website** with its real thumbnail, the
+title from your caption, and — when the Worker has a Workers AI binding — a
+fresh AI-written description and hashtags ([docs/ai-caption-agent.md](ai-caption-agent.md)).
 
 How it works, in one line:
 
@@ -115,10 +116,15 @@ automatically (give it up to a minute for caches).
 ### Publish a video file
 Forward/send a video to the bot — it is published immediately, exactly as before.
 
-- First line of the caption = **title**
-- `#Hashtags` = **tags**; one matching a site category sets the
-  **category** — use underscores for multi-word ones: `#POV`, `#MILF`,
-  `#Big_Ass`, `#Big_Tits`, `#4K_Ultra_HD`. No match → `Homemade`.
+- First line of the caption = **title** (links are stripped from it; line 1 wins,
+  hashtags never end up in the title even when its line has none)
+- `#Hashtags` one matching a site category set the **category** —
+  `#POV`, `#MILF`, `#Big_Ass`, `#4K_Ultra_HD`. No match → `Homemade`.
+- With the Workers AI binding the **description and hashtags are written per
+  video** by the caption agent; extra caption text and hashtags are context for
+  it, not published verbatim. No binding (or `CAPTION_AGENT=off`) → a
+  deterministic fallback line plus category/orientation tags. `/caption` shows
+  the status — see [docs/ai-caption-agent.md](ai-caption-agent.md).
 - No caption → the file name becomes the title.
 
 ### Publish from a link (scrape → review → confirm)
