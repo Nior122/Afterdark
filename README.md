@@ -53,6 +53,14 @@ from the post widget itself (`tgme_widget_message_video_duration` overlay), so T
 real `41:05` badge instead of `0:00`; videos imported before this reads `0:00` until deleted and
 re-added by link.
 
+**Telegram CTA:** every opened video — the watch page in public mode and the standalone `/v/…` page in
+direct mode — shows one animated Telegram-blue button, *Watch Full Video* with a paper-plane, between the
+like/share row and the description box (under the title on direct pages), always outside the box and never
+on grid cards. It links to the owner's bot (`https://t.me/KasiQueenbot`, constant `TELEGRAM_CTA_URL` in
+`src/components/TelegramCta.tsx`; change it there and rebuild). Being page-level, it covers existing and
+future videos alike. The label sheens, the plane nudges every few seconds and the pill breathes — all
+motion stops under `prefers-reduced-motion`, and the link opens in a new tab with `noopener noreferrer`.
+
 Fields: URL (required), title (required, auto-filled for YouTube links), optional thumbnail URL,
 category and optional duration (`8:31` or seconds). Everything is stored in the browser only —
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are

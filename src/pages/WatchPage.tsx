@@ -16,6 +16,7 @@ import VideoRow from '../components/VideoRow'
 import KebabMenu from '../components/KebabMenu'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
+import TelegramCta from '../components/TelegramCta'
 import NotFoundPage from './NotFoundPage'
 import { channelPath, type Ad } from '../data/seed'
 import { avatarFallbackFor } from '../lib/avatars'
@@ -348,6 +349,10 @@ export default function WatchPage() {
             />
           </div>
         </div>
+
+        {/* Owner CTA — between the action row and the description box, outside
+            it (see components/TelegramCta.tsx). Only ever on opened videos. */}
+        <TelegramCta className="mt-3" />
 
         <div className="mt-4 rounded-xl bg-raise px-3.5 py-3">
           <div className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">

@@ -113,6 +113,11 @@ automatically (give it up to a minute for caches).
 
 ## Daily use
 
+Every opened video page on the site also carries an animated **Watch Full Video** button that sends
+viewers to `https://t.me/KasiQueenbot` — visitors one tap away from the bot that publishes the site.
+The link is a one-line constant (`TELEGRAM_CTA_URL` in `src/components/TelegramCta.tsx`); it covers
+every existing and future video automatically and needs nothing from the Worker.
+
 ### Publish a video file
 Forward/send a video to the bot — it is published immediately, exactly as before.
 

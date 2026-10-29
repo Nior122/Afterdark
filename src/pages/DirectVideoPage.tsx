@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import AdSlot, { GlobalAdScript } from '../components/AdSlot'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
+import TelegramCta from '../components/TelegramCta'
 import { applyVideoMeta } from '../lib/meta'
 import { absoluteUrl } from '../lib/site'
 import { useStore } from '../lib/store'
@@ -120,6 +121,9 @@ export default function DirectVideoPage() {
       <h1 className="mt-5 text-pretty text-[19px] font-bold leading-[1.35] tracking-[-0.015em] text-ink sm:text-[24px]">
         {video.title}
       </h1>
+
+      {/* Owner CTA — under the video, before the description (components/TelegramCta.tsx). */}
+      <TelegramCta className="mt-4" />
 
       {video.description?.trim() && (
         <p className="mt-3 max-w-[70ch] whitespace-pre-line text-[13px] leading-[1.7] text-muted sm:text-[13.5px]">

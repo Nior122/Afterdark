@@ -45,11 +45,18 @@ function check(name, condition, detail = '') {
 for (const video of SEED_VIDEOS) {
   const html = render(video.id)
   const others = SEED_VIDEOS.filter((other) => other.id !== video.id)
-  const anchors = [...html.matchAll(/<a\s[^>]*href="([^"]*)"/gi)].map((match) => match[1])
+  // Owner CTA anchors (a[data-cta], the "Watch Full Video" Telegram button)
+  // are intentional on every opened video; the invariant forbids navigation
+  // links only — attribute order in the serialized tag must not matter.
+  const anchors = [...html.matchAll(/<a\s(?![^>]*data-cta)[^>]*href="([^"]*)"/gi)].map((match) => match[1])
 
   check(`${video.id}: renders its title`, html.includes(video.title.replace(/&/g, '&amp;').replace(/"/g, '&quot;')))
   check(`${video.id}: has a player`, /<video|iframe|<button/.test(html))
   check(`${video.id}: no anchors`, anchors.length === 0, JSON.stringify(anchors))
+  check(
+    `${video.id}: Telegram CTA present`,
+    /<a\s[^>]*data-cta="telegram"/.test(html) && /<a\s[^>]*href="https:\/\/t\.me\/KasiQueenbot"/.test(html),
+  )
   check(`${video.id}: no other video id`, !others.some((other) => html.includes(other.id)))
   check(`${video.id}: no related/up-next wording`, !/up next|related|suggested|more videos|autoplay next/i.test(html))
 }

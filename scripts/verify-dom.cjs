@@ -124,7 +124,9 @@ async function run() {
   await wait(600)
   text = dom.window.document.body.textContent
   check('video page: renders its title', /Tatum Christine/.test(text), text.slice(0, 120))
-  check('video page: no anchors', dom.window.document.querySelectorAll('a').length === 0)
+  // The owner's Telegram CTA (a[data-cta]) is an intentional outbound link;
+  // the invariant is about site navigation leaking onto standalone pages.
+  check('video page: no anchors', dom.window.document.querySelectorAll('a:not([data-cta])').length === 0)
   check('video page: no related rail', !/Up next|Related/i.test(text))
 
   dom = mountApp('/admin/', 'public')
