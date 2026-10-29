@@ -105,3 +105,68 @@ textarea:focus,
 select:focus {
   outline: none;
 }
+
+/*
+ * Telegram CTA ("Watch Full Video"), rendered by src/components/TelegramCta.tsx
+ * on opened video pages only. Three gentle, independent loops: a sheen sweeps
+ * across the label, the paper-plane nudges forward every few seconds, and the
+ * whole pill breathes via brightness (not box-shadow, so the ring-* utility's
+ * own shadow chain survives). Everything stops under prefers-reduced-motion.
+ */
+.tg-cta {
+  animation: tg-breathe 3.6s ease-in-out infinite;
+}
+.tg-cta-label {
+  background: linear-gradient(110deg, #ffffff 42%, #a8e2ff 50%, #ffffff 58%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tg-sheen 2.6s linear infinite;
+}
+.tg-cta-plane {
+  animation: tg-nudge 4.4s ease-in-out infinite;
+}
+@keyframes tg-sheen {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
+  }
+}
+@keyframes tg-nudge {
+  0%,
+  78%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  84% {
+    transform: rotate(-6deg) translate3d(3px, -3px, 0);
+  }
+  90% {
+    transform: rotate(-6deg) translate3d(-1px, 1px, 0);
+  }
+}
+@keyframes tg-breathe {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.13);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-cta,
+  .tg-cta-label,
+  .tg-cta-plane {
+    animation: none;
+  }
+  .tg-cta-label {
+    background: none;
+    color: inherit;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+  }
+}

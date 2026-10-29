@@ -228,6 +228,67 @@ const scenarios = [
       !/Source:/i.test(text),
   },
   {
+    name: 'the watch page offers the Telegram CTA above the description box',
+    path: '#/watch/tg-vertical',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [verticalFeedVideo_] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) =>
+      /Watch Full Video/.test(text) &&
+      /Watch Full Video[\s\S]*A caption from the channel\./.test(text),
+    probes: (w) => {
+      const cta = w.document.querySelector('a[data-cta]')
+      const box = Array.from(w.document.querySelectorAll('div')).find(
+        (el) => /(^|\s)bg-raise(\s|$)/.test(el.className || '') && /caption from the channel/.test(el.textContent || ''),
+      )
+      return [
+        ['CTA links to the Telegram bot', cta?.getAttribute('href') === 'https://t.me/KasiQueenbot'],
+        ['CTA opens in a new tab, referrer-safe', cta?.getAttribute('target') === '_blank' && /noopener/.test(cta?.getAttribute('rel') || '')],
+        ['CTA sits outside the description box', Boolean(cta) && !cta.closest('.bg-raise') && !/Watch Full Video/.test(box?.textContent || '')],
+        ['CTA is above the description box', Boolean(cta && box) && (box.compareDocumentPosition(cta) & w.Node.DOCUMENT_POSITION_PRECEDING) > 0],
+      ]
+    },
+  },
+  {
+    name: 'the standalone /v/ page carries the CTA and still keeps its chrome anchor-free',
+    path: '/v/v-pov-kat-mar10/',
+    fetch: okWorker('direct'),
+    accepted: true,
+    expect: (text) => /Kat Mar10/.test(text) && /Watch Full Video/.test(text),
+    noAnchors: true,
+    probes: (w) => [
+      ['CTA present on the direct-mode page', Boolean(w.document.querySelector('a[data-cta="telegram"][href="https://t.me/KasiQueenbot"]'))],
+      ['CTA renders outside the description (before it, under the video)', (() => {
+        const cta = w.document.querySelector('a[data-cta]')
+        const desc = Array.from(w.document.querySelectorAll('p')).find((p) => (p.textContent || '').trim().length > 0)
+        return Boolean(cta && desc) && (desc.compareDocumentPosition(cta) & w.Node.DOCUMENT_POSITION_PRECEDING) > 0
+      })()],
+    ],
+  },
+  {
+    name: 'catalogue cards never carry the CTA — only opened videos do',
+    path: '/',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [verticalFeedVideo_] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Vertical Clip/.test(text) && !/Watch Full Video/.test(text),
+    probes: (w) => [['no CTA anchor anywhere on the grid', !w.document.querySelector('a[data-cta]')]],
+  },
+  {
     name: 'portrait uploads keep their shape in the catalogue grid',
     path: '/',
     fetch: onlyWorker((url) => {
@@ -588,7 +649,10 @@ for (const [index, scenario] of scenarios.entries()) {
 
     const body = window.document.body
     const text = (body.textContent || '').replace(/\s+/g, ' ').trim()
-    const anchors = body.querySelectorAll('a').length
+    // `data-cta` anchors (the owner's Telegram "Watch Full Video" button) are
+    // allowed on standalone pages — the invariant guards against *navigation*
+    // links (header, related rails), not owner-issued external calls to action.
+    const anchors = body.querySelectorAll('a:not([data-cta])').length
     const problems = []
 
     if (!text) problems.push('page is empty (black screen)')
