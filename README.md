@@ -159,7 +159,7 @@ What the bot does:
 
 | Feature | How |
 | --- | --- |
-| Publish a forwarded video | Caption line 1 = title, `#Hashtags` = tags/category; published immediately |
+| Publish a forwarded video | Caption line 1 = title; `#Hashtags` guide the category and a Workers AI agent writes the description and hashtags fresh per video ([details](docs/ai-caption-agent.md)); published immediately |
 | **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
