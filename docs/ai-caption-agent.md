@@ -6,7 +6,11 @@ hashtags, generated fresh for that video. No API keys, no external accounts —
 it runs on Cloudflare Workers AI, bound to the same Worker as the bot.
 
 Scraped link-imports are **not** captioned by the agent (their pages already
-carry descriptions); the agent runs only on Telegram video uploads.
+carry descriptions); the agent runs only on Telegram video uploads. Those
+scraped descriptions *are* published — with links removed: promo URLs are
+stripped when the draft is created, and the public feed re-strips stored text
+on every response, so even records published by an older Worker serve clean
+pages without any republishing.
 
 ## What the agent does with your caption
 
