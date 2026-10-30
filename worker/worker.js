@@ -2160,11 +2160,31 @@ async function wpRestRescue(pageUrl) {
  * the player's own `poster` attribute) and the real duration. Purely best
  * effort: any failure leaves the draft as-is.
  */
+async function epornerThumbnailRescue(url) {
+  let id = ''
+  try {
+    id = new URL(url).pathname.match(/(?:video-|embed\/)([A-Za-z0-9]+)/i)?.[1] || ''
+  } catch {
+    return ''
+  }
+  if (!id) return ''
+  const data = await fetchJson(
+    `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(id)}&thumbsize=big&format=json`,
+  )
+  const thumbs = Array.isArray(data?.thumbs) ? data.thumbs.map((thumb) => thumb?.src) : []
+  const candidates = [data?.default_thumb?.src, ...thumbs]
+  return candidates.find((value) => typeof value === 'string' && /^https?:\/\//i.test(value)) || ''
+}
+
+/**
+ * A tube's /embed/ page is served to third-party iframes, so it is readable
+ * even when the watch page isn't. EPorner also exposes an official metadata
+ * API; use its poster field when the embed HTML is blocked or has no poster.
+ */
 async function decorateEmbedItem(item) {
   if (item.sourceKind !== 'embed' || item.thumbnail) return
-  let response
   try {
-    response = await fetch(item.sourceUrl, {
+    const response = await fetch(item.sourceUrl, {
       redirect: 'follow',
       headers: {
         'User-Agent': USER_AGENT,
@@ -2172,24 +2192,34 @@ async function decorateEmbedItem(item) {
       },
       signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
     })
-    if (!response.ok) return
-    const html = (await response.text()).slice(0, 400000)
-    const thumb = firstPosterImageUrl(html, item.sourceUrl)
-    if (thumb) {
-      try {
-        item.thumbnail = new URL(decodeEntities(thumb), item.sourceUrl).toString()
-      } catch {
-        /* leave undecorated */
+    if (response.ok) {
+      const html = (await response.text()).slice(0, 400000)
+      const thumb = firstPosterImageUrl(html, response.url || item.sourceUrl)
+      if (thumb) {
+        try {
+          item.thumbnail = new URL(decodeEntities(thumb), response.url || item.sourceUrl).toString()
+        } catch {
+          /* leave undecorated */
+        }
+      }
+      if (!item.durationSec) {
+        const seconds =
+          parseDurationToSeconds(metaContent(html, 'og:video:duration')) ||
+          parseDurationToSeconds(/"(?:duration|video_duration|length)"\s*:\s*(\d{1,6})/.exec(html)?.[1])
+        if (seconds > 0) item.durationSec = seconds
       }
     }
-    if (!item.durationSec) {
-      const seconds =
-        parseDurationToSeconds(metaContent(html, 'og:video:duration')) ||
-        parseDurationToSeconds(/"(?:duration|video_duration|length)"\s*:\s*(\d{1,6})/.exec(html)?.[1])
-      if (seconds > 0) item.durationSec = seconds
-    }
   } catch {
-    /* decoration is optional — playback never depends on it */
+    /* embed HTML is optional — playback never depends on it */
+  }
+
+  if (!item.thumbnail) {
+    let host = ''
+    try { host = new URL(item.sourceUrl).hostname.replace(/^www\./i, '') } catch { /* ignore */ }
+    if (host === 'eporner.com') {
+      const thumb = await epornerThumbnailRescue(item.sourceUrl)
+      if (thumb) item.thumbnail = thumb
+    }
   }
 }
 
