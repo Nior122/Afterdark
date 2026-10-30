@@ -2356,7 +2356,7 @@ function firstPosterImageUrl(html, pageUrl) {
   const candidates = [];
   const add = (value) => { const raw = String(value || '').trim(); if (raw) candidates.push(raw); };
   const attribute = (tag, name) => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\function scrapePage(html, pageUrl) {');
+    const escaped = name.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
     const match = new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
     return match?.[1] ?? match?.[2] ?? match?.[3] ?? '';
   };
