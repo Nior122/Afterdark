@@ -2144,6 +2144,9 @@ async function wpRestRescue(pageUrl) {
   }
   const contentHay = `${post?.content?.rendered || ''}\n${post?.excerpt?.rendered || ''}\n${fields}`
   const fileUrl = firstMediaFileUrl(contentHay, post.link || pageUrl)
+  const frameRaw = /<iframe\\b[^>]*\\bsrc=["']([^"']+)["']/i.exec(contentHay)?.[1] || ''
+  let playerUrl = ''
+  try { if (frameRaw) playerUrl = new URL(decodeEntities(frameRaw), post.link || pageUrl).toString() } catch { /* ignore malformed player URL */ }
   let thumb =
     firstPosterImageUrl(contentHay, post.link || pageUrl) ||
     post?.jetpack_featured_media_url ||
@@ -2156,7 +2159,7 @@ async function wpRestRescue(pageUrl) {
   }
   const title = post?.title?.rendered ? cleanTitle(post.title.rendered) : ''
   if (!fileUrl && !thumb && !title) return null
-  return { fileUrl, thumb: thumb || '', title }
+  return { fileUrl, playerUrl, thumb: thumb || '', title }
 }
 
 /**
@@ -2744,6 +2747,9 @@ async function createDraftsFromUrl(env, rawUrl) {
         if (single.sourceKind === 'page' && rest.fileUrl) {
           single.sourceUrl = rest.fileUrl
           single.sourceKind = 'file'
+        } else if (single.sourceKind === 'page' && rest.playerUrl) {
+          single.sourceUrl = rest.playerUrl
+          single.sourceKind = 'embed'
         }
         if (!single.thumbnail && rest.thumb) single.thumbnail = rest.thumb
       }
