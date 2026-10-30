@@ -168,7 +168,7 @@ What the bot does:
 | Feature | How |
 | --- | --- |
 | Publish a forwarded video | Caption line 1 = title; `#Hashtags` guide the category and a Workers AI agent writes the description and hashtags fresh per video ([details](docs/ai-caption-agent.md)); published immediately |
-| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
+| **Scrape a link into drafts** | Paste a URL: the Worker reads title, poster, description, duration, playable embed and category — and every video on a gallery page (up to 24). A page link that hides its file gets rescued: JS-player configs, `data-src` lazy-loaders and plain DOWNLOAD anchors resolve to the real `.mp4`, and watch links on bot-blocking tubes with stable embeds (eporner, iceporn) convert to their `/embed/` player even when the page can't be read at all. On `t.me` post links, duration and media aspect come from the post widget itself, and portrait uploads get portrait cards. Source URLs already on the site come back as duplicates instead of new drafts |
 | **Review before publishing** | Draft card with ✅ Publish · ✏️ Edit title · 🏷 Category · ❌ Cancel; galleries get Publish all / Review each / Cancel all. Nothing is public until you confirm |
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |

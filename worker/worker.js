@@ -1827,9 +1827,20 @@ function firstMediaFileUrl(html, pageUrl) {
 }
 
 /** Playable source for a scraped item: direct file, or an embeddable player. */
-function pickSourceUrl(candidates) {
+function pickSourceUrl(candidates, pageUrl) {
   for (const candidate of candidates) {
-    const url = String(candidate || '').trim()
+    let url = String(candidate || '').trim()
+    if (!url) continue
+    // Protocol-relative values (`<iframe src="//www.player.test/embed/x">`)
+    // are perfectly playable once resolved against the page — resolve them
+    // instead of dropping them.
+    if (/^\/\//.test(url) && pageUrl) {
+      try {
+        url = new URL(url, pageUrl).toString()
+      } catch {
+        /* keep the raw value; the http test below rejects it */
+      }
+    }
     if (!/^https?:\/\//i.test(url)) continue
     if (/\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(url)) return { sourceUrl: url, kind: 'file' }
     if (/(\/embed\/|\/e\/|player\.|embed\.|youtube\.com\/embed|player\.vimeo\.com)/i.test(url)) {
@@ -1837,6 +1848,60 @@ function pickSourceUrl(candidates) {
     }
   }
   return null
+}
+
+/**
+ * Tubes whose embed URL is derivable from the watch link. Salvage for pages
+ * that block bot fetches entirely or mount their player only through JS:
+ * rather than a non-playable page link, the draft gets the player embed the
+ * site already knows how to render (its built-in samples are eporner iframes)
+ * — and it works without reading the source page at all. Only proven
+ * embeddable hosts belong on this list.
+ */
+const KNOWN_EMBED_HOSTS = [
+  {
+    host: /^eporner\.com$/i,
+    watch: /(?:^|\/)video-([A-Za-z0-9]+)/i,
+    embed: (match) => `https://www.eporner.com/embed/${match[1]}/`,
+  },
+  {
+    host: /^iceporn\.com$/i,
+    watch: /\/(?:video|embed)\/(\d+)/i,
+    embed: (match) => `https://www.iceporn.com/embed/${match[1]}`,
+  },
+]
+
+/** Embed URL derived from a watch link on a known tube, or null. */
+function knownEmbedFor(url) {
+  let host = ''
+  try {
+    host = new URL(url).hostname.replace(/^www\./i, '')
+  } catch {
+    return null
+  }
+  for (const site of KNOWN_EMBED_HOSTS) {
+    if (!site.host.test(host)) continue
+    const match = site.watch.exec(url)
+    if (match) return { sourceUrl: site.embed(match), kind: 'embed' }
+  }
+  return null
+}
+
+/** "…/video-abc123/viral-couple/" -> "Viral Couple": title for embed-only
+ * drafts when the source page itself could not be read. */
+function titleFromWatchUrl(url) {
+  try {
+    const path = new URL(url).pathname
+    const slug = path.split('/').filter(Boolean).pop() || ''
+    const words = slug
+      .replace(/^video-[A-Za-z0-9]+-?/i, '')
+      .replace(/\.(html?|php|aspx?)$/i, '')
+      .replace(/[-_+]+/g, ' ')
+      .trim()
+    return words.length >= 3 ? titleCase(words).slice(0, 180) : ''
+  } catch {
+    return ''
+  }
 }
 
 function inferCategory(...hints) {
@@ -1953,11 +2018,10 @@ function scrapePage(html, pageUrl) {
   for (const node of jsonLdVideoObjects(html)) {
     const title = cleanTitle(firstString(node.name) || firstString(node.headline))
     if (!title) continue
-    const source = pickSourceUrl([
-      firstString(node.contentUrl),
-      firstString(node.embedUrl),
-      firstString(node.url),
-    ])
+    const source = pickSourceUrl(
+      [firstString(node.contentUrl), firstString(node.embedUrl), firstString(node.url)],
+      pageUrl,
+    )
     push({
       title,
       sourceUrl: source?.sourceUrl || pageUrl,
@@ -2041,16 +2105,19 @@ function scrapePage(html, pageUrl) {
 
   // 3) Nothing structured: fall back to the page itself as a single video.
   if (!items.length && pageTitle) {
-    const source = pickSourceUrl([
-      metaContent(html, 'og:video:secure_url'),
-      metaContent(html, 'og:video:url'),
-      metaContent(html, 'og:video'),
-      /<video\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
-      /<source\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
-      /<iframe\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
-      // JS-configured players keep the file in a script object, not a tag.
-      firstMediaFileUrl(html, pageUrl),
-    ])
+    const source = pickSourceUrl(
+      [
+        metaContent(html, 'og:video:secure_url'),
+        metaContent(html, 'og:video:url'),
+        metaContent(html, 'og:video'),
+        /<video\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
+        /<source\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
+        /<iframe\b[^>]*src=["']([^"']+)["']/i.exec(html)?.[1],
+        // JS-configured players keep the file in a script object, not a tag.
+        firstMediaFileUrl(html, pageUrl),
+      ],
+      pageUrl,
+    )
     push({
       title: pageTitle,
       sourceUrl: source?.sourceUrl || pageUrl,
@@ -2108,23 +2175,89 @@ async function createDraftsFromUrl(env, rawUrl) {
     }
   }
 
+  // Known-tube watch links carry a playable fallback derived from the URL
+  // itself — the embed works even when the page refuses bot fetches outright.
+  const embed = knownEmbedFor(url)
   const page = await fetchPage(url)
-  if (page.error) {
-    return {
-      error:
-        `I could not read that page (${page.error}). Many adult sites block server-side ` +
-        'requests or require JavaScript. Paste the direct embed/player link instead ' +
-        '(e.g. …/embed/abc123/), or forward the video file to the bot.',
+  let parsed = null
+  if (!page.error) {
+    parsed = scrapePage(page.html, page.finalUrl || url)
+
+    // A "page" item that points at THIS page may still be playable: some
+    // blogs hand the file to visitors as a plain download link, and others
+    // wrap a tube's player in an iframe. The JSON-LD pass resolves before
+    // those signals and can mark the page itself as the source, so this
+    // sweep re-runs the media scan for exactly those items. Gallery
+    // siblings are other pages we never fetched — left alone.
+    const pageKey = normaliseSourceUrl(page.finalUrl || url)
+    const singlePage = parsed.items.length === 1
+    for (const item of parsed.items) {
+      if (item.sourceKind !== 'page' || normaliseSourceUrl(item.sourceUrl) !== pageKey) continue
+      if (embed) {
+        item.sourceUrl = embed.sourceUrl
+        item.sourceKind = embed.kind
+        continue
+      }
+      if (!singlePage) continue
+      const fileUrl = firstMediaFileUrl(page.html, page.finalUrl || url)
+      if (fileUrl) {
+        item.sourceUrl = fileUrl
+        item.sourceKind = 'file'
+        continue
+      }
+      const frame = /<iframe\b[^>]*src=["']([^"']+)["']/i.exec(page.html)?.[1]
+      let fromFrame = null
+      if (frame) {
+        try {
+          fromFrame = knownEmbedFor(new URL(decodeEntities(frame), page.finalUrl || url).toString())
+        } catch {
+          fromFrame = null
+        }
+      }
+      if (fromFrame) {
+        item.sourceUrl = fromFrame.sourceUrl
+        item.sourceKind = fromFrame.kind
+      }
     }
   }
 
-  const parsed = scrapePage(page.html, page.finalUrl || url)
-  if (!parsed.items.length) {
-    return {
-      error:
-        `I reached that page but found no video on it` +
-        `${parsed.pageTitle ? ` (title: "${parsed.pageTitle}")` : ''}. ` +
-        'Send the link to the video itself.',
+  if (!parsed?.items.length) {
+    if (!embed) {
+      return {
+        error: page.error
+          ? `I could not read that page (${page.error}). Many adult sites block server-side ` +
+            'requests or require JavaScript. Paste the direct embed/player link instead ' +
+            '(e.g. …/embed/abc123/), or forward the video file to the bot.'
+          : `I reached that page but found no video on it` +
+            `${parsed.pageTitle ? ` (title: "${parsed.pageTitle}")` : ''}. ` +
+            'Send the link to the video itself.',
+      }
+    }
+    // Embeddable tube whose page could not be read or yielded nothing:
+    // the link alone is enough to build a playable draft.
+    let fallbackHost = ''
+    try {
+      fallbackHost = new URL(url).hostname.replace(/^www\./i, '')
+    } catch {
+      fallbackHost = ''
+    }
+    const slugTitle = titleFromWatchUrl(url)
+    parsed = {
+      items: [
+        {
+          title: slugTitle || titleCase(fallbackHost.split('.')[0] || '') || 'Video',
+          sourceUrl: embed.sourceUrl,
+          sourceKind: embed.kind,
+          thumbnail: '',
+          description: '',
+          durationSec: 0,
+          category: inferCategory(slugTitle, new URL(embed.sourceUrl).pathname),
+          tags: collectTags(slugTitle),
+          site: fallbackHost,
+        },
+      ],
+      site: fallbackHost,
+      pageTitle: '',
     }
   }
 

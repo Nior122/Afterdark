@@ -72,6 +72,25 @@ const FLUID_PAGE = `<!doctype html><html><head>
 const DATASRC_PAGE = `<!doctype html><html><head><title>Site Clip Only</title></head>
 <body><div class="vp-player" data-src="/wp/uploads/2026/09/site-clip.mp4"></div></body></html>`
 
+// The darknaija pattern: a JSON-LD VideoObject that only points at the page
+// itself (so the structured pass marks it unplayable), while the real file
+// sits in a cross-host DOWNLOAD anchor. The page-item rescue pass must find
+// the download link the JSON-LD pass shadowed.
+const SHADOW_DL_PAGE = `<!doctype html><html><head><title>Street Baddie</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"VideoObject","name":"Street Baddie","url":"https://blog.test/shadow-dl/"}</script>
+</head><body><a class="btn" href="https://cdn.blog.test/uploads/2026/street-baddie.mp4">DOWNLOAD VIDEO</a></body></html>`
+
+// The mzansi pattern: the post embeds a tube player in a protocol-relative
+// iframe. Resolving it must yield the tube's watch URL, which maps to a
+// known embeddable player.
+const FRAME_PAGE = `<!doctype html><html><head><title>Tiny Amateur GF Made A Sex Tape</title></head>
+<body><iframe src="//www.iceporn.com/video/2229757/tiny-african-amateur" allowfullscreen></iframe></body></html>`
+
+// An embeddable tube's page with no parseable player markup at all: the URL
+// salvage must still turn it into the tube's stable embed.
+const BAR_EPORNER_PAGE = `<!doctype html><html><head><title>Some Other Clip</title></head>
+<body><div class="nojs-player">loading…</div></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -157,6 +176,19 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://blocked.test/video/999') {
     return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://blog.test/shadow-dl/') {
+    return new Response(SHADOW_DL_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://mzansi.test/tiny-gf-sex-tape') {
+    return new Response(FRAME_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://www.eporner.com/video-CqzTB8dIhZD/viral-couple/') {
+    // Eporner's anti-bot wall: the worker never gets the player config.
+    return new Response('Just a moment...', { status: 403, headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://www.eporner.com/video-ABC123xyz/some-other-clip/') {
+    return new Response(BAR_EPORNER_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   return realFetch(url, opts)
 }
@@ -573,6 +605,66 @@ async function main() {
     body: JSON.stringify({ url: 'https://blocked.test/video/999' }),
   })
   check('admin reports a blocked page', blocked.status === 422)
+
+  // Rescue passes for "page"-kind items (darknaija / mzansi / eporner).
+  const shadow = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://blog.test/shadow-dl/' }),
+  })
+  const shadowBody = await shadow.json()
+  check(
+    'download-link rescues a JSON-LD page item',
+    shadowBody.drafts?.[0]?.sourceUrl === 'https://cdn.blog.test/uploads/2026/street-baddie.mp4'
+      && shadowBody.drafts?.[0]?.sourceKind === 'file',
+    JSON.stringify(shadowBody).slice(0, 180),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const framed = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://mzansi.test/tiny-gf-sex-tape' }),
+  })
+  const framedBody = await framed.json()
+  check(
+    'protocol-relative player iframe becomes its known embed',
+    framedBody.drafts?.[0]?.sourceUrl === 'https://www.iceporn.com/embed/2229757'
+      && framedBody.drafts?.[0]?.sourceKind === 'embed',
+    JSON.stringify(framedBody).slice(0, 180),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const tubeBlocked = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://www.eporner.com/video-CqzTB8dIhZD/viral-couple/' }),
+  })
+  const tubeBlockedBody = await tubeBlocked.json()
+  check(
+    'blocked tube page still drafts via the URL-derived embed',
+    tubeBlocked.status === 200
+      && tubeBlockedBody.drafts?.[0]?.sourceUrl === 'https://www.eporner.com/embed/CqzTB8dIhZD/'
+      && tubeBlockedBody.drafts?.[0]?.sourceKind === 'embed',
+    JSON.stringify(tubeBlockedBody).slice(0, 180),
+  )
+  check('embed-only draft gets its title from the link slug', tubeBlockedBody.drafts?.[0]?.title === 'Viral Couple', JSON.stringify(tubeBlockedBody.drafts?.[0]?.title))
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const tubeScraped = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://www.eporner.com/video-ABC123xyz/some-other-clip/' }),
+  })
+  const tubeScrapedBody = await tubeScraped.json()
+  check(
+    'scrapable tube page prefers the stable embed over the bare page link',
+    tubeScrapedBody.drafts?.[0]?.sourceUrl === 'https://www.eporner.com/embed/ABC123xyz/'
+      && tubeScrapedBody.drafts?.[0]?.sourceKind === 'embed'
+      && tubeScrapedBody.drafts?.[0]?.title === 'Some Other Clip',
+    JSON.stringify(tubeScrapedBody).slice(0, 220),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
 
   // The gallery was published earlier; scraping it whole must read as duplicate.
   const galleryAgain = await admin('scrape', {
