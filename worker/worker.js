@@ -2757,8 +2757,8 @@ async function createDraftsFromUrl(env, rawUrl) {
     // Recover player duration/timestamp even when the source is a lazy-loaded
     // WordPress player rather than an Open Graph video.
     const pageDuration = extractDurationSeconds(page.html)
-    if (pageDuration > 0) {
-      for (const item of parsed.items) if (!item.durationSec) item.durationSec = pageDuration
+    if (pageDuration > 0 && parsed.items.length === 1 && !parsed.items[0].durationSec) {
+      parsed.items[0].durationSec = pageDuration
     }
     // Recover posters outside Open Graph metadata on single-video pages.
     if (parsed.items.length === 1 && !parsed.items[0].thumbnail) {
