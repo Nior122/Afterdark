@@ -13,7 +13,7 @@ export default function HomePage() {
 
   const recommendedAds = ads.slice(0, 4)
   const trendingAds = ads.slice(4, 8)
-  const latest = allVideos.slice(0, 8)
+  const latest = allVideos
 
   const popularCategories = CATEGORIES.filter((category) => category !== 'All')
     .map((category) => ({
@@ -45,8 +45,8 @@ export default function HomePage() {
       )}
 
       {latest.length > 0 && (
-        <Section title="Latest videos" viewAllTo="/explore">
-          <VideoGrid videos={latest} />
+        <Section title="Latest videos">
+          <VideoGrid videos={latest} chronological />
         </Section>
       )}
 

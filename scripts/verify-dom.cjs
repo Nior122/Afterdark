@@ -34,6 +34,7 @@ let mode = 'public'
 // Optional payloads the admin endpoints answer with (portrait-thumb checks).
 let adminVideos = []
 let adminDrafts = []
+let feedVideos = []
 const requests = []
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -68,7 +69,7 @@ function mockFetch() {
     const url = String(input)
     requests.push(url)
     if (url.endsWith('/api/settings')) return new Response(JSON.stringify({ mode }), { status: 200 })
-    if (url.endsWith('/api/videos')) return new Response(JSON.stringify({ videos: [] }), { status: 200 })
+    if (url.endsWith('/api/videos')) return new Response(JSON.stringify({ videos: feedVideos }), { status: 200 })
     if (url.endsWith('/api/admin/settings')) {
       return new Response(
         JSON.stringify({ mode, modes: ['public', 'direct'], github: false, feedUrl: 'https://worker.test' }),
@@ -119,6 +120,27 @@ async function run() {
   text = dom.window.document.body.textContent
   check('public mode: catalogue renders', /Latest videos|Popular categories/i.test(text), text.slice(0, 200))
   check('public mode: has internal links', dom.window.document.querySelectorAll('a').length > 0)
+
+  // More than eight older feed records must not hide newer seeded uploads.
+  feedVideos = [
+    ...Array.from({ length: 10 }, (_, i) => ({
+      id: `tg-old-${i}`, title: `Older feed video ${i}`, category: 'Homemade',
+      sourceUrl: `https://example.test/embed/old-${i}`, createdAt: Date.parse('2026-09-01T12:00:00Z') - i * 1000,
+    })),
+    { id: 'tg-newest', title: 'Newest feed video', category: 'Homemade',
+      sourceUrl: 'https://example.test/embed/newest', createdAt: Date.parse('2026-11-01T12:00:00Z') },
+  ]
+  dom = mountApp('/', 'public')
+  await wait(700)
+  text = dom.window.document.body.textContent
+  const feedTitle = text.indexOf('Newest feed video')
+  const seededTitle = text.indexOf('Sunday Sex Show 55')
+  const oldTitle = text.indexOf('Older feed video 0')
+  check('latest: merged uploads sorted newest first', feedTitle >= 0 && seededTitle > feedTitle && oldTitle > seededTitle)
+  check('latest: all catalogue videos shown', text.includes('Older feed video 9') && text.includes('Isabella Clark') && text.includes('Swimming Public Pool'))
+  const latestSection = [...dom.window.document.querySelectorAll('section')].find((section) => section.querySelector('h2')?.textContent === 'Latest videos')
+  check('latest: chronological grid reads across rows', Boolean(latestSection?.querySelector('.grid')))
+  feedVideos = []
 
   dom = mountApp('/v/v-pov-tatum-christine/', 'direct')
   await wait(600)
