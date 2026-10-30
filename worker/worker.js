@@ -2599,6 +2599,17 @@ async function collectLinkRecords(env) {
 /** Fill the fields a stale record is missing from a freshly parsed item. */
 function fillRecordFromItem(record, item) {
   let changed = false
+  // A re-paste upgrades the poster, and also a title that was never a title:
+  // records published from obfuscated shell pages carry the site brand
+  // ("DarkNaija") where the scrape now has the real headline.
+  if (
+    item.title
+    && isBrandOnly(record.title, record.site, hostOf(record.sourceUrl || ''))
+    && !isBrandOnly(item.title, record.site, hostOf(record.sourceUrl || ''))
+  ) {
+    record.title = item.title
+    changed = true
+  }
   // Re-scraping duplicates also repairs old generic/site-logo posters.
   if (item.thumbnail && record.thumbUrl !== item.thumbnail) { record.thumbUrl = item.thumbnail; changed = true }
   if (!record.description && item.description) { record.description = item.description; changed = true }
@@ -2665,6 +2676,36 @@ function cleanTitle(value) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 180)
+}
+
+/** Lowercase alphanumeric stem of a brand, with a trailing domain suffix removed. */
+function normBrand(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\.[a-z]{2,}(?:\.[a-z]{2,3})?$/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * True when a scraped title is nothing but the site's own name — the obfus-
+ * cated shell some blogs (darknaija et al) serve to non-browsers carries
+ * `<title>DarkNaija</title>` where the human page says "Kampala Lady …".
+ * A brand-only title makes a useless card and a useless search snippet, so
+ * callers replace it with the CMS post title or the URL slug.
+ */
+function isBrandOnly(title, site, host) {
+  const t = normBrand(title)
+  if (!t) return true
+  return t === normBrand(site) || t === normBrand(host)
+}
+
+function hostOf(value) {
+  try {
+    return new URL(String(value || '')).hostname.replace(/^www\./i, '')
+  } catch {
+    return ''
+  }
 }
 
 function collectTags(...sources) {
@@ -2916,15 +2957,20 @@ function scrapePage(html, pageUrl) {
       ],
       pageUrl,
     )
+    // A blog serving its brand as the whole title tells us nothing about the
+    // video. Permalinks carry the real headline in the last path segment
+    // (darknaija: /2026-10-29/kampala-lady-josephine-…/), so prefer that —
+    // and derive category/tags from the same text the title now shows.
+    const usableTitle = (isBrandOnly(pageTitle, site, host) && titleFromWatchUrl(pageUrl)) || pageTitle
     push({
-      title: pageTitle,
+      title: usableTitle,
       sourceUrl: source?.sourceUrl || pageUrl,
       sourceKind: source?.kind || 'page',
       thumbnail: pageThumb,
       description: stripTags(pageDescription).slice(0, 600),
       durationSec: parseDurationToSeconds(metaContent(html, 'og:video:duration')),
-      category: inferCategory(pageKeywords, pageTitle, pageDescription, pathHint),
-      tags: collectTags(pageKeywords, pageTitle),
+      category: inferCategory(pageKeywords, usableTitle, pageDescription, pathHint),
+      tags: collectTags(pageKeywords, usableTitle),
       site,
     })
   }
@@ -3103,6 +3149,12 @@ async function createDraftsFromUrl(env, rawUrl) {
         }
         if (rest.thumb) single.thumbnail = rest.thumb
         if (!single.durationSec && rest.durationSec) single.durationSec = rest.durationSec
+        // The REST post title is the true headline the blog wrote — it beats
+        // whatever the bot-facing shell claimed. (Rescued but never applied
+        // before: that is why darknaija cards read "DarkNaija".)
+        if (rest.title && isBrandOnly(single.title, single.site, hostOf(page.finalUrl || url))) {
+          single.title = rest.title
+        }
       }
     }
     // No usable source (or only an unrecognised player iframe)? Chase the
