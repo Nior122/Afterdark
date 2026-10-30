@@ -65,15 +65,17 @@ Click **Deploy** after adding them.
 Optional, for the dashboard's **Rebuild site** button — and once set, rebuilds
 become **automatic**: every publish/unpublish/repair dispatches one debounced
 rebuild, so `sitemap.xml` and the static pages keep up with the bot without
-you touching GitHub. Details (and the Search Console checklist) live in
-[docs/google-search-console.md](google-search-console.md).
+you touching GitHub. Pick the row set for where your site is hosted — both
+sets at once is fine and fires both. Details (and the Search Console
+checklist) live in [docs/google-search-console.md](google-search-console.md).
 
 | Name | Value |
 | --- | --- |
-| `GITHUB_TOKEN` | A fine-grained PAT with **Actions: read and write** on this repo |
-| `GITHUB_REPO` | `Nior122/Afterdark` |
+| `GITHUB_TOKEN` | A fine-grained PAT with **Actions: read and write** on this repo (GitHub Pages) |
+| `GITHUB_REPO` | `Nior122/Afterdark` (GitHub Pages) |
 | `GITHUB_WORKFLOW` | `deploy.yml` (default) |
 | `GITHUB_BRANCH` | `main` (default) |
+| `CLOUDFLARE_BUILD_HOOK` | The URL from your Pages project's **Settings → Builds & deployment → Build hooks** (Cloudflare Pages — no tokens needed) |
 | `AUTO_REBUILD` | `off` to keep the button but stop the automatic triggers (Worker **variable**) |
 | `REBUILD_GAP_MS` | debounce window for the automatic trigger, default `240000` (Worker **variable**) |
 
@@ -309,7 +311,7 @@ to appear on the site automatically:
 | Scraped video has the wrong title | Press ✏️ Edit title on the draft card before publishing, or /rename the id afterwards. |
 | Wrong category | 🏷 Category on the draft card; re-infer it from the page's keywords if they were unclear. |
 | Dashboard says "admin-disabled" | Set the `ADMIN_TOKEN` secret on the Worker and redeploy. |
-| New video isn't in sitemap.xml yet | The static sitemap is generated at build time: with `GITHUB_TOKEN`/`GITHUB_REPO` set it now triggers itself a few minutes after each publish (or press **Rebuild site** in the dashboard; a nightly workflow covers anything missed). On Cloudflare Pages the video is already indexable regardless — its page is built live from the feed. Direct links work immediately either way. Full matrix: [google-search-console.md](google-search-console.md). |
+| New video isn't in sitemap.xml yet | The static sitemap is generated at build time: with a rebuild target set on the Worker (`GITHUB_TOKEN`/`GITHUB_REPO`, or `CLOUDFLARE_BUILD_HOOK` for Cloudflare Pages) it triggers itself a few minutes after each publish (or press **Rebuild site** in the dashboard; a nightly workflow covers anything missed on the GitHub copy). On Cloudflare Pages the video is already indexable regardless — its page is built live from the feed. Direct links work immediately either way. Full matrix: [google-search-console.md](google-search-console.md). |
 | GSC says “Domain property” vs “URL prefix” — which? | Domain property (DNS TXT) if you control the domain — it covers every host and protocol. URL-prefix otherwise, verified with `VITE_GOOGLE_SITE_VERIFICATION` (meta tag on every page) or by dropping Google's `google….html` file into `public/`. Then submit `sitemap.xml`. |
 | Video page says “This link cannot be embedded here” with an “Open original” button | The stored record points at a page, not a playable file — either it was added via the site's Create dialog (browser-local scratchpad, not a publish path), or it was scraped before the player-config parser existed. Delete the entry, then re-send the same link to the bot / Scrape panel on the updated Worker: it now reads `sources:[{file:"…mp4"}]` JS configs (Fluid Player etc.), VideoPress/known-tube iframes, and even chases unknown player iframes to their file, and stores whatever playable source it finds. If the blog exposes no direct file at all, “Open original” is the intended behaviour. |
 | Scraped video opens but **play is broken** (“no video to play”, black player) | The blog's CDN serves the file only to its own site (hotlink protection) — a raw link from `afterdark` gets refused. On the current Worker this is already handled: scraped files and posters play through `…/api/videos/<id>/stream.mp4` / `thumb.jpg` with the source site's Referer. If you still see it, the Worker is stale — paste `worker/worker.js` into it, **Save and Deploy**, then open the video again (no re-publish needed; old records start working once the Worker proxies them). |

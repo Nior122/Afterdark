@@ -290,7 +290,11 @@ const scenarios = [
   },
   {
     name: 'portrait uploads keep their shape in the catalogue grid',
-    path: '/',
+    // The home 'Latest videos' section is chronological ROWS by design (since
+    // 'Show all latest videos in chronological order'); masonry lives on the
+    // catalogue grids — Explore's "Fresh uploads" is the one that always
+    // renders every feed video.
+    path: '#/explore',
     fetch: onlyWorker((url) => {
       if (url.endsWith('/api/settings')) {
         return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))

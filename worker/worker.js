@@ -57,9 +57,12 @@
  *                                 "Rebuild site" button AND the automatic,
  *                                 debounced rebuild after every publish (keeps
  *                                 sitemap.xml + static pages in step with the
- *                                 catalogue). Var AUTO_REBUILD="off" vetoes the
- *                                 automatic part; REBUILD_GAP_MS changes the
- *                                 window (default 240000).
+ *                                 catalogue). Var/Secret CLOUDFLARE_BUILD_HOOK
+ *                                 (a Cloudflare Pages build-hook URL) does the
+ *                                 same for a Pages-hosted site — either target,
+ *                                 or both, at once. Var AUTO_REBUILD="off"
+ *                                 vetoes the automatic part; REBUILD_GAP_MS
+ *                                 changes the window (default 240000).
  *   Binding AI                    Workers AI (no API key). Enables the caption
  *                                 + hashtag agent for Telegram uploads.
  *   Var     CAPTION_AGENT         "off" disables the agent. HASHTAG_AGENT is
@@ -535,26 +538,38 @@ function adminAuthorised(request, env) {
 /* ------------------------------ rebuild trigger -----------------------------
  * The PRERENDERED pages and sitemap.xml only ever describe the catalogue as
  * of the last build — so every publish, unpublish, repair or metadata edit
- * that changes what search engines should see schedules a GitHub Pages
- * rebuild, debounced so a bulk publish of 24 videos is ONE deploy, not 24:
- * the first change fires immediately, later ones within the window set a
- * queue flag, and that flag drains on the next bot activity or dashboard
- * open once the window passed. The nightly Actions schedule is the backstop.
- * On Cloudflare Pages this is a courtesy only — the middleware serves live
- * indexable pages from the feed regardless of what was last built.
+ * that changes what search engines should see schedules a Pages rebuild —
+ * whichever host is configured: the GitHub Pages deploy workflow
+ * (GITHUB_TOKEN + GITHUB_REPO) and/or a Cloudflare Pages BUILD HOOK
+ * (CLOUDFLARE_BUILD_HOOK — a POST URL that makes the Pages project rebuild
+ * from the repo, which regenerates its sitemap.xml). Debounced so a bulk
+ * publish of 24 videos is ONE deploy, not 24: the first change fires
+ * immediately, later ones within the window set a queue flag, and that flag
+ * drains on the next bot activity or dashboard open once the window passed.
+ * The nightly Actions schedule is the backstop for the GitHub copy. The
+ * Cloudflare middleware serves live indexable pages either way — the hook
+ * merely keeps the sitemap itself fresh without waiting for a git push.
  * -------------------------------------------------------------------------- */
 const REBUILD_KEY_LAST = 'rebuild:last'
 const REBUILD_KEY_QUEUE = 'rebuild:queued'
 const REBUILD_GAP_MS = 4 * 60 * 1000
 
-/** GITHUB_TOKEN + GITHUB_REPO make it possible; AUTO_REBUILD=off vetoes it. */
+/** Which hosts can be poked: 'github', 'cloudflare', both, or neither. */
+function rebuildTargets(env) {
+  const targets = []
+  if (env.GITHUB_TOKEN && env.GITHUB_REPO) targets.push('github')
+  if (String(env.CLOUDFLARE_BUILD_HOOK || '').trim()) targets.push('cloudflare')
+  return targets
+}
+
+/** Any configured rebuild target enables it; AUTO_REBUILD=off vetoes it. */
 function rebuildEnabled(env) {
-  return Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO)
+  return rebuildTargets(env).length > 0
     && String(env.AUTO_REBUILD || '').trim().toLowerCase() !== 'off'
 }
 
-/** Fire the deploy workflow once. Never throws; returns { ok, detail }. */
-async function dispatchRebuildNow(env) {
+/** Fire the GitHub Pages deploy workflow once. Never throws; { ok, detail }. */
+async function dispatchGithubWorkflow(env) {
   const [owner, repo] = String(env.GITHUB_REPO || '').split('/')
   if (!owner || !repo) return { ok: false, detail: 'GITHUB_REPO must be "owner/repo".' }
   const workflow = env.GITHUB_WORKFLOW || 'deploy.yml'
@@ -581,6 +596,59 @@ async function dispatchRebuildNow(env) {
   } catch (error) {
     return { ok: false, detail: String(error?.message || error) }
   }
+}
+
+/**
+ * Cloudflare Pages build hook: an empty POST to the project's hook URL
+ * (Settings → Build & deploy → Build hooks) starts a production rebuild —
+ * which runs `npm run build`, so dist, /v/ pages AND sitemap.xml refresh.
+ * The hook URL is itself the credential; no token, no repo variables.
+ */
+async function dispatchCloudflareBuild(env) {
+  const hook = String(env.CLOUDFLARE_BUILD_HOOK || '').trim()
+  try {
+    const response = await fetch(hook, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'afterdark-admin',
+      },
+      body: '{}',
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined,
+    })
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      return { ok: false, detail: `Cloudflare returned ${response.status}: ${detail.slice(0, 200)}` }
+    }
+    return { ok: true, detail: '' }
+  } catch (error) {
+    return { ok: false, detail: String(error?.message || error) }
+  }
+}
+
+/**
+ * Fire every configured target. Never throws. { ok } is true when at least
+ * one target started; `detail` lists what failed (partial success included),
+ * so the dashboard can report it without the queue re-firing forever.
+ */
+async function dispatchRebuildNow(env) {
+  const targets = rebuildTargets(env)
+  if (!targets.length) {
+    return {
+      ok: false,
+      detail:
+        'No rebuild target configured — set GITHUB_TOKEN + GITHUB_REPO (GitHub Pages) ' +
+        'or CLOUDFLARE_BUILD_HOOK (a Cloudflare Pages build-hook URL) on the Worker.',
+    }
+  }
+  const results = []
+  for (const target of targets) {
+    results.push(target === 'github' ? await dispatchGithubWorkflow(env) : await dispatchCloudflareBuild(env))
+  }
+  const failed = results.filter((result) => !result.ok)
+  const detail = failed.map((result) => result.detail).join('; ').slice(0, 400)
+  if (failed.length === targets.length) return { ok: false, detail }
+  return { ok: true, detail }
 }
 
 async function scheduleRebuild(env) {
@@ -934,13 +1002,14 @@ async function handleAdmin(request, env, url) {
 
   // --- rebuild (optional GitHub Actions trigger) -------------------------
   if (path === 'rebuild' && method === 'POST') {
-    if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
+    if (!rebuildTargets(env).length) {
       return json(
         {
           error: 'rebuild-not-configured',
           message:
-            'Add GITHUB_TOKEN and GITHUB_REPO Worker secrets to trigger a rebuild from here. ' +
-            'Until then, re-run the deploy workflow yourself after adding videos.',
+            'Add GITHUB_TOKEN + GITHUB_REPO (GitHub Pages) or CLOUDFLARE_BUILD_HOOK ' +
+            '(a Cloudflare Pages build-hook URL) to trigger a rebuild from here. ' +
+            'Until then, re-run the deploy workflow (or the Pages build) yourself after adding videos.',
         },
         503,
         cors,
@@ -956,7 +1025,16 @@ async function handleAdmin(request, env, url) {
       await env.VIDEOS.put(REBUILD_KEY_LAST, String(Date.now()))
       await env.VIDEOS.delete(REBUILD_KEY_QUEUE)
     } catch { /* clock is best effort */ }
-    return json({ ok: true, message: 'Rebuild started. The sitemap updates in a minute or two.' }, 200, cors)
+    return json(
+      {
+        ok: true,
+        message: result.detail
+          ? 'Rebuild started — but one target failed: ' + result.detail
+          : 'Rebuild started. The sitemap updates in a minute or two.',
+      },
+      200,
+      cors,
+    )
   }
 
   return json({ error: 'not-found', message: `Unknown admin endpoint ${path}` }, 404, cors)

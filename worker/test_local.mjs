@@ -145,6 +145,8 @@ const CHASE_TARGET = `<!doctype html><html><head><title>Chased Clip — Player</
 const proxiedUpstream = []
 /** Bodies of simulated GitHub workflow_dispatch calls (auto-rebuild tests). */
 const rebuildDispatches = []
+/** URLs of simulated Cloudflare Pages build-hook POSTs (auto-rebuild tests). */
+const rebuildHookPosts = []
 // mzansiadultblog reality for old reposts: the post stands, the embedded
 // clip is gone at the source, and the page SAYS so.
 const DEAD_REPOST_PAGE = `<!doctype html><html><head><title>Wow Look At That Ass</title></head>
@@ -271,6 +273,11 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u === 'https://api.github.com/repos/RBOWNER/RB/actions/workflows/deploy.yml/dispatches') {
     rebuildDispatches.push(JSON.parse(opts.body || '{}'))
     return new Response('', { status: 202 })
+  }
+  if (u.startsWith('https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/')) {
+    rebuildHookPosts.push(u)
+    if (u.includes('/dead-')) return new Response('{"success":false,"errors":[{"message":"invalid hook"}]}', { status: 403 })
+    return new Response('{"success":true,"result":{"id":"deploy-hook-test"}}', { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   if (u === 'https://www.eporner.com/video-ABC123xyz/some-other-clip/') {
     return new Response(BAR_EPORNER_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -1357,6 +1364,63 @@ async function main() {
   await seedRbDraft('d-rb4', 'https://rb.test/four.mp4')
   await rb({ ...rbEnv, AUTO_REBUILD: 'off' }, 'drafts/d-rb4/publish', { method: 'POST' })
   check('AUTO_REBUILD=off vetoes the trigger', rebuildDispatches.length === 3)
+
+  // A Cloudflare Pages site needs NO GitHub config: the build hook alone is
+  // the trigger (URL is its own credential; Pages re-runs `npm run build`).
+  await env.VIDEOS.delete('rebuild:last')
+  const cfHook = 'https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/livetok'
+  const cfEnv = { ...env, ADMIN_TOKEN: 'admin-secret', CLOUDFLARE_BUILD_HOOK: cfHook }
+  await seedRbDraft('d-rb5', 'https://rb.test/five.mp4')
+  await rb(cfEnv, 'drafts/d-rb5/publish', { method: 'POST' })
+  check(
+    'hook-only config fires the Cloudflare build hook instead of GitHub',
+    rebuildHookPosts.length === 1 && rebuildHookPosts[0] === cfHook && rebuildDispatches.length === 3,
+    JSON.stringify({ hooks: rebuildHookPosts, gh: rebuildDispatches.length }),
+  )
+  const cfSettings = await (await rb(cfEnv, 'settings')).json()
+  check(
+    'admin settings report autoRebuild from the hook alone (no GitHub config)',
+    cfSettings.autoRebuild === true && cfSettings.github === false,
+    JSON.stringify({ ar: cfSettings.autoRebuild, gh: cfSettings.github }),
+  )
+  const cfPublic = await (await call(cfEnv, 'https://worker.test/api/settings')).json()
+  check('public /api/settings still leaks neither target nor token hints', cfPublic.mode && cfPublic.github === undefined)
+  // Both hosts configured: one catalogue change refreshes BOTH copies.
+  await env.VIDEOS.delete('rebuild:last')
+  await seedRbDraft('d-rb6', 'https://rb.test/six.mp4')
+  await rb({ ...rbEnv, CLOUDFLARE_BUILD_HOOK: cfHook }, 'drafts/d-rb6/publish', { method: 'POST' })
+  check(
+    'both targets fire on one change when both are configured',
+    rebuildDispatches.length === 4 && rebuildHookPosts.length === 2,
+    JSON.stringify({ gh: rebuildDispatches.length, hooks: rebuildHookPosts.length }),
+  )
+  // A dead hook (revoked token, typo'd URL) must not stop the GitHub copy.
+  await env.VIDEOS.delete('rebuild:last')
+  const halfEnv = { ...rbEnv, CLOUDFLARE_BUILD_HOOK: 'https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/dead-tok' }
+  await seedRbDraft('d-rb7', 'https://rb.test/seven.mp4')
+  const rb7 = await (await rb(halfEnv, 'drafts/d-rb7/publish', { method: 'POST' })).json()
+  check(
+    'a failing hook does not veto the GitHub target',
+    rb7.ok && rebuildDispatches.length === 5,
+    JSON.stringify({ ok: rb7.ok, gh: rebuildDispatches.length }),
+  )
+  const halfManual = await rb(halfEnv, 'rebuild', { method: 'POST' })
+  const halfBody = await halfManual.json()
+  check(
+    'the dashboard reports partial success instead of hiding it',
+    halfManual.status === 200 && halfBody.ok && /one target failed/i.test(halfBody.message || ''),
+    JSON.stringify(halfBody).slice(0, 160),
+  )
+  // With neither configured, the button explains both options.
+  const noneRes = await rb({ ...env, ADMIN_TOKEN: 'admin-secret' }, 'rebuild', { method: 'POST' })
+  const noneBody = await noneRes.json()
+  check(
+    'unconfigured rebuild names CLOUDFLARE_BUILD_HOOK as the Pages route',
+    noneRes.status === 503 && /CLOUDFLARE_BUILD_HOOK/.test(noneBody.message || ''),
+    JSON.stringify(noneBody).slice(0, 160),
+  )
+  await env.VIDEOS.delete('rebuild:last')
+  await env.VIDEOS.delete('rebuild:queued')
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
