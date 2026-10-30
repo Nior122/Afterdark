@@ -2840,7 +2840,7 @@ async function createDraftsFromUrl(env, rawUrl) {
     // the raw post content (file URL) and the true poster, and it can fill
     // the title when the page itself came back obfuscated or empty.
     const single = parsed.items.length === 1 ? parsed.items[0] : null
-    if (single && WP_HINT.test(page.html) && (single.sourceKind === 'page' || !single.thumbnail)) {
+    if (single && WP_HINT.test(page.html) && (single.sourceKind === 'page' || !single.thumbnail || !single.durationSec)) {
       const rest = await wpRestRescue(page.finalUrl || url)
       if (rest) {
         if (single.sourceKind === 'page' && rest.fileUrl) {
