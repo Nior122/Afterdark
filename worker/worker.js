@@ -2191,7 +2191,7 @@ async function decorateEmbedItem(item) {
     if (!item.durationSec) {
       const seconds =
         parseDurationToSeconds(metaContent(html, 'og:video:duration')) ||
-        parseDurationToSeconds(/"(?:duration|video_duration|length)"\\s*:\\s*(\\d{1,6})/.exec(html)?.[1])
+        parseDurationToSeconds(/"(?:duration|video_duration|length)"\s*:\s*(\d{1,6})/.exec(html)?.[1])
       if (seconds > 0) item.durationSec = seconds
     }
   } catch {
