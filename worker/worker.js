@@ -2144,6 +2144,30 @@ function wpSlugFromUrl(pageUrl) {
  * the raw post content (a `media_details`/`source_url` trail on the upload
  * even covers videos). Two calls max, best-effort, both optional.
  */
+/** Fetch and normalize one EPorner video record across both documented response shapes. */
+async function fetchEpornerMetadata(videoId) {
+  const base = 'https://www.eporner.com/api/v2/video/'
+  const unwrap = (payload) => {
+    if (Array.isArray(payload)) return payload[0] || null
+    if (payload && typeof payload === 'object') {
+      if (Array.isArray(payload.videos)) return payload.videos[0] || null
+      if (payload.video && typeof payload.video === 'object') return payload.video
+      if (payload.id || payload.default_thumb || payload.length_sec) return payload
+    }
+    return null
+  }
+  const byId = await fetchJson(`${base}id/?id=${encodeURIComponent(videoId)}&thumbsize=big&format=json`, 4500)
+  let video = unwrap(byId)
+  if (!video || (!video.default_thumb?.src && !video.length_sec && !video.length_min)) {
+    const search = await fetchJson(
+      `${base}search/?query=${encodeURIComponent(videoId)}&per_page=1&thumbsize=big&format=json`,
+      4500,
+    )
+    video = unwrap(search) || video
+  }
+  return video
+}
+
 async function wpRestRescue(pageUrl) {
   const slug = wpSlugFromUrl(pageUrl)
   if (!slug) return null
@@ -2180,8 +2204,11 @@ async function wpRestRescue(pageUrl) {
     thumb = typeof media?.source_url === 'string' ? media.source_url : ''
   }
   const title = post?.title?.rendered ? cleanTitle(post.title.rendered) : ''
-  if (!fileUrl && !thumb && !title) return null
-  return { fileUrl, playerUrl, thumb: thumb || '', title }
+  const durationSec = extractDurationSeconds(contentHay) ||
+    parseDurationToSeconds(post?.yoast_head_json?.schema?.['@graph']?.find?.((node) => node?.duration)?.duration) ||
+    parseDurationToSeconds(/"duration"\s*:\s*"?(PT[^"\s,}]+|\d+(?::\d{2}){1,2})/i.exec(contentHay)?.[1])
+  if (!fileUrl && !thumb && !title && !durationSec) return null
+  return { fileUrl, playerUrl, thumb: thumb || '', title, durationSec }
 }
 
 /**
@@ -2214,12 +2241,10 @@ async function decorateEmbedItem(item) {
     // EPorner is handled through its metadata API only. Never wait on the
     // embed HTML/player: that endpoint can stall from Cloudflare Workers.
     if (item._epornerMetadataChecked) return
-    const metadata = await fetchJson(
-      `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(videoId)}&thumbsize=big&format=json`,
-      5000,
-    )
+    const metadata = await fetchEpornerMetadata(videoId)
     const apiThumb = metadata?.default_thumb?.src ||
-      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '')
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '') ||
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.src)?.src : '')
     if (typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb)) item.thumbnail = apiThumb
     if (!item.durationSec) {
       item.durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
@@ -2725,12 +2750,10 @@ async function createDraftsFromUrl(env, rawUrl) {
   let page
   let parsed = null
   if (epornerId && embed) {
-    const metadata = await fetchJson(
-      `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(epornerId)}&thumbsize=big&format=json`,
-      5000,
-    )
+    const metadata = await fetchEpornerMetadata(epornerId)
     const apiThumb = metadata?.default_thumb?.src ||
-      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '')
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '') ||
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.src)?.src : '')
     const durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
     parsed = {
       items: [{
@@ -2828,6 +2851,7 @@ async function createDraftsFromUrl(env, rawUrl) {
           single.sourceKind = 'embed'
         }
         if (rest.thumb) single.thumbnail = rest.thumb
+        if (!single.durationSec && rest.durationSec) single.durationSec = rest.durationSec
       }
     }
     // No usable source (or only an unrecognised player iframe)? Chase the
