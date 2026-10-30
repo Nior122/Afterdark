@@ -732,6 +732,11 @@ async function handleAdmin(request, env, url) {
         // Videos skipped because the same source URL is already published or
         // waiting in drafts — the dashboard's bulk scrape shows this per URL.
         duplicates: result.duplicates || 0,
+        // In-place fixes of stale listings (see createDraftsFromUrl): an old
+        // page-only record upgraded to the playable source, and a published
+        // record that gained the poster/duration it was missing.
+        repaired: result.repaired || 0,
+        backfilled: result.backfilled || 0,
         site: result.site,
         pageTitle: result.pageTitle,
       },
@@ -1811,19 +1816,65 @@ function firstMediaFileUrl(html, pageUrl) {
     // both; resolved against the page URL below).
     new RegExp(`["'](\\/[^"'\\s]*?\\.(?:mp4|webm|m4v|ogv)(?:\\?[^"'\\s]*)?)["']`, 'i'),
   ]
-  for (const pattern of patterns) {
-    const match = pattern.exec(html)
-    if (!match) continue
-    let absolute
+  // Page-builder sites (darknaija et al) serialise player configs as JSON, so
+  // the URL only ever appears with escaped slashes (`https:\/\/cdn…\.mp4`)
+  // or wrapped in percent-encoding inside a redirect link — plain scans miss
+  // both. Match against the unescaped copy first, then the decoded one.
+  const unescaped = String(html || '').replace(/\\\//g, '/')
+  const haystacks = [unescaped]
+  try {
+    const decoded = decodeURIComponent(unescaped)
+    if (decoded !== unescaped) haystacks.push(decoded)
+  } catch {
+    /* malformed % sequences: the raw scan already covers what is findable */
+  }
+  for (const haystack of haystacks) {
+    for (const pattern of patterns) {
+      const match = pattern.exec(haystack)
+      if (!match) continue
+      let absolute
+      try {
+        absolute = new URL(decodeEntities(match[1]), pageUrl).toString()
+      } catch {
+        continue
+      }
+      if (absolute === pageUrl || absolute.startsWith(`${pageUrl}#`)) continue
+      return absolute
+    }
+  }
+  return ''
+}
+
+/**
+ * First `<iframe>` on the page whose (possibly protocol-relative, possibly
+ * redirect-wrapped `…/embed/redirect?target_url=https%3A%2F%2F…`) src points
+ * at a tube with a known embed pattern. Blogs like mzansiadultblog mount the
+ * player this way and obfuscate everything else.
+ */
+function firstKnownFrameEmbed(html, pageUrl) {
+  for (const match of String(html || '').matchAll(/<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi)) {
+    const raw = decodeEntities(match[1]).trim()
+    if (!raw || /^javascript:/i.test(raw)) continue
+    let absolute = ''
     try {
-      absolute = new URL(decodeEntities(match[1]), pageUrl).toString()
+      absolute = new URL(raw, pageUrl).toString()
     } catch {
       continue
     }
-    if (absolute === pageUrl || absolute.startsWith(`${pageUrl}#`)) continue
-    return absolute
+    const direct = knownEmbedFor(absolute)
+    if (direct) return direct
+    let decoded = ''
+    try {
+      decoded = decodeURIComponent(absolute)
+    } catch {
+      decoded = ''
+    }
+    if (decoded && decoded !== absolute) {
+      const viaRedirect = knownEmbedFor(decoded)
+      if (viaRedirect) return viaRedirect
+    }
   }
-  return ''
+  return null
 }
 
 /** Playable source for a scraped item: direct file, or an embeddable player. */
@@ -1902,6 +1953,145 @@ function titleFromWatchUrl(url) {
   } catch {
     return ''
   }
+}
+
+/* ----------------------- WordPress REST salvage -------------------------- */
+
+const WP_HINT = /\/wp-content\/|wp-json|generator["']\s*content=["']WordPress/i
+
+async function fetchJson(url) {
+  try {
+    const response = await fetch(url, {
+      redirect: 'follow',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+    })
+    if (!response.ok) return null
+    return JSON.parse((await response.text()).slice(0, 600000))
+  } catch {
+    return null
+  }
+}
+
+/** The post slug from a permalink (`/2026/10/29/my-clip/` -> `my-clip`). */
+function wpSlugFromUrl(pageUrl) {
+  try {
+    const segments = new URL(pageUrl).pathname.split('/').filter(Boolean)
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      const segment = decodeURIComponent(segments[index]).replace(/\.[a-z0-9]+$/i, '')
+      if (/^\d{4}-\d{2}-\d{2}$/.test(segment) || /^\d+$/.test(segment) || /^(?:amp|page|category|tag)$/.test(segment)) continue
+      return /^[A-Za-z0-9][A-Za-z0-9_-]{2,}$/.test(segment) ? segment : ''
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * WordPress blogs (darknaija et al) mount their players client-side and serve
+ * obfuscated markup to non-browsers, but the REST API usually still exposes
+ * the raw post content (a `media_details`/`source_url` trail on the upload
+ * even covers videos). Two calls max, best-effort, both optional.
+ */
+async function wpRestRescue(pageUrl) {
+  const slug = wpSlugFromUrl(pageUrl)
+  if (!slug) return null
+  let origin = ''
+  try {
+    origin = new URL(pageUrl).origin
+  } catch {
+    return null
+  }
+  const posts = await fetchJson(`${origin}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}`)
+  const post = Array.isArray(posts) ? posts[0] : null
+  if (!post) return null
+  let fields = ''
+  for (const key of ['meta', 'acf']) {
+    try {
+      fields = `${fields}\n${JSON.stringify(post[key] || {})}`
+    } catch {
+      /* ignore circular/oversized payloads */
+    }
+  }
+  const contentHay = `${post?.content?.rendered || ''}\n${post?.excerpt?.rendered || ''}\n${fields}`
+  const fileUrl = firstMediaFileUrl(contentHay, post.link || pageUrl)
+  let thumb = metaContent(String(post.yoast_head || ''), 'og:image')
+  if (!thumb && post.featured_media) {
+    const media = await fetchJson(`${origin}/wp-json/wp/v2/media/${post.featured_media}`)
+    thumb = typeof media?.source_url === 'string' ? media.source_url : ''
+  }
+  const title = post?.title?.rendered ? cleanTitle(post.title.rendered) : ''
+  if (!fileUrl && !thumb && !title) return null
+  return { fileUrl, thumb: thumb || '', title }
+}
+
+/**
+ * A tube's /embed/ page is served to third-party iframes, so it is readable
+ * even when the watch page isn't — use it to fill in the poster (og:image or
+ * the player's own `poster` attribute) and the real duration. Purely best
+ * effort: any failure leaves the draft as-is.
+ */
+async function decorateEmbedItem(item) {
+  if (item.sourceKind !== 'embed' || item.thumbnail) return
+  let response
+  try {
+    response = await fetch(item.sourceUrl, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+      },
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    })
+    if (!response.ok) return
+    const html = (await response.text()).slice(0, 400000)
+    const thumb = metaContent(html, 'og:image') || /<video\b[^>]*\bposter=["']([^"']+)["']/i.exec(html)?.[1] || ''
+    if (thumb) {
+      try {
+        item.thumbnail = new URL(decodeEntities(thumb), item.sourceUrl).toString()
+      } catch {
+        /* leave undecorated */
+      }
+    }
+    if (!item.durationSec) {
+      const seconds =
+        parseDurationToSeconds(metaContent(html, 'og:video:duration')) ||
+        parseDurationToSeconds(/"(?:duration|video_duration|length)"\s*:\s*(\d{1,6})/.exec(html)?.[1])
+      if (seconds > 0) item.durationSec = seconds
+    }
+  } catch {
+    /* decoration is optional — playback never depends on it */
+  }
+}
+
+/** Published link records keyed by normalised source URL (for in-place fixes). */
+async function collectLinkRecords(env) {
+  const bySource = new Map()
+  try {
+    const ids = await readIndex(env)
+    const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+    for (const record of records) {
+      if (!record || record.kind !== 'link') continue
+      const key = normaliseSourceUrl(record.sourceUrl)
+      if (key) bySource.set(key, record)
+    }
+  } catch {
+    /* best effort, like collectSourceUrls */
+  }
+  return bySource
+}
+
+/** Fill the fields a stale record is missing from a freshly parsed item. */
+function fillRecordFromItem(record, item) {
+  let changed = false
+  if (!record.thumbUrl && item.thumbnail) { record.thumbUrl = item.thumbnail; changed = true }
+  if (!record.description && item.description) { record.description = item.description; changed = true }
+  if (!record.durationSec && item.durationSec) { record.durationSec = item.durationSec; changed = true }
+  if (!record.width && item.width) { record.width = item.width; record.height = item.height || 0; changed = true }
+  if (!record.site && item.site) { record.site = item.site; changed = true }
+  if (!record.tags?.length && item.tags?.length) { record.tags = item.tags; changed = true }
+  return changed
 }
 
 function inferCategory(...hints) {
@@ -2192,6 +2382,25 @@ async function createDraftsFromUrl(env, rawUrl) {
     const pageKey = normaliseSourceUrl(page.finalUrl || url)
     const singlePage = parsed.items.length === 1
     for (const item of parsed.items) {
+      // A wrapper URL (`…/embed/redirect?target_url=…`) that merely points at
+      // a known tube becomes the tube's canonical, stable embed instead — one
+      // less indeterminate hop at play time.
+      if (item.sourceKind === 'embed') {
+        let canonical = knownEmbedFor(item.sourceUrl)
+        if (!canonical) {
+          let decoded = ''
+          try {
+            decoded = decodeURIComponent(item.sourceUrl)
+          } catch {
+            decoded = ''
+          }
+          if (decoded && decoded !== item.sourceUrl) canonical = knownEmbedFor(decoded)
+        }
+        if (canonical && canonical.sourceUrl !== item.sourceUrl) {
+          item.sourceUrl = canonical.sourceUrl
+        }
+        continue
+      }
       if (item.sourceKind !== 'page' || normaliseSourceUrl(item.sourceUrl) !== pageKey) continue
       if (embed) {
         item.sourceUrl = embed.sourceUrl
@@ -2205,18 +2414,25 @@ async function createDraftsFromUrl(env, rawUrl) {
         item.sourceKind = 'file'
         continue
       }
-      const frame = /<iframe\b[^>]*src=["']([^"']+)["']/i.exec(page.html)?.[1]
-      let fromFrame = null
-      if (frame) {
-        try {
-          fromFrame = knownEmbedFor(new URL(decodeEntities(frame), page.finalUrl || url).toString())
-        } catch {
-          fromFrame = null
-        }
-      }
+      const fromFrame = firstKnownFrameEmbed(page.html, page.finalUrl || url)
       if (fromFrame) {
         item.sourceUrl = fromFrame.sourceUrl
         item.sourceKind = fromFrame.kind
+      }
+    }
+
+    // WordPress salvage for the stubborn cases: the REST API often still has
+    // the raw post content (file URL) and the true poster, and it can fill
+    // the title when the page itself came back obfuscated or empty.
+    const single = parsed.items.length === 1 ? parsed.items[0] : null
+    if (single && WP_HINT.test(page.html) && (single.sourceKind === 'page' || !single.thumbnail)) {
+      const rest = await wpRestRescue(page.finalUrl || url)
+      if (rest) {
+        if (single.sourceKind === 'page' && rest.fileUrl) {
+          single.sourceUrl = rest.fileUrl
+          single.sourceKind = 'file'
+        }
+        if (!single.thumbnail && rest.thumb) single.thumbnail = rest.thumb
       }
     }
   }
@@ -2261,15 +2477,56 @@ async function createDraftsFromUrl(env, rawUrl) {
     }
   }
 
+  // Embed items (tube players we point the iframe at) rarely arrive with a
+  // poster — fetch the embed page once and decorate missing thumbnails and
+  // durations before the draft/repair stage.
+  for (const item of parsed.items.slice(0, 3)) await decorateEmbedItem(item)
+
   // Skip anything already published or sitting in a pending draft with the
   // same source URL: a bulk re-scrape should say "duplicate", not double-post.
+  // Two deliberate exceptions, both in-place fixes of OLD listings so a
+  // re-paste can never dead-end on a stale record:
+  //   • a published record that only points at THIS page (imported before it
+  //     was resolvable) gets its source upgraded to the playable URL found
+  //     now — repairing, not re-publishing;
+  //   • a published record with the very same source as a duplicate item
+  //     receives the fields it is missing (poster, duration, description).
   const known = await collectSourceUrls(env)
+  const stored = await collectLinkRecords(env)
+  const pageKey = normaliseSourceUrl(page.finalUrl || url)
   const batchId = `b${randomId(8)}`
   const drafts = []
   let duplicates = 0
+  let repaired = 0
+  let backfilled = 0
   for (const item of parsed.items) {
     const key = normaliseSourceUrl(item.sourceUrl)
+    if (item.sourceKind !== 'page' && pageKey && key !== pageKey && repaired === 0) {
+      const stale = stored.get(pageKey)
+      if (stale && stale.sourceKind === 'page') {
+        stale.sourceUrl = item.sourceUrl
+        stale.sourceKind = item.sourceKind
+        fillRecordFromItem(stale, item)
+        stale.updatedAt = Date.now()
+        await env.VIDEOS.put(`v:${stale.id}`, JSON.stringify(stale))
+        stored.delete(pageKey)
+        repaired += 1
+        // A pending draft of the same broken page link is now obsolete.
+        for (const draft of await listDrafts(env)) {
+          if (draft.sourceKind === 'page' && normaliseSourceUrl(draft.sourceUrl) === pageKey) {
+            await removeDraftEverywhere(env, draft.id)
+          }
+        }
+        continue
+      }
+    }
     if (key && known.has(key)) {
+      const record = stored.get(key)
+      if (record && fillRecordFromItem(record, item)) {
+        record.updatedAt = Date.now()
+        await env.VIDEOS.put(`v:${record.id}`, JSON.stringify(record))
+        backfilled += 1
+      }
       duplicates += 1
       continue
     }
@@ -2300,7 +2557,7 @@ async function createDraftsFromUrl(env, rawUrl) {
     await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(drafts.map((draft) => draft.id)))
   }
 
-  return { drafts, duplicates, site: parsed.site, pageTitle: parsed.pageTitle }
+  return { drafts, duplicates, repaired, backfilled, site: parsed.site, pageTitle: parsed.pageTitle }
 }
 
 /** Source URLs of everything already on the site or waiting as a draft. */
@@ -2339,9 +2596,26 @@ async function scrapeIntoDrafts(env, chatId, rawUrl) {
   if (result.error) return send(env, chatId, `⚠️ ${result.error}`)
 
   const { drafts } = result
+  if (!drafts.length && (result.repaired || result.backfilled)) {
+    const lines = []
+    if (result.repaired) {
+      lines.push(
+        `🔧 Repaired ${result.repaired} existing listing${result.repaired === 1 ? '' : 's'} ` +
+        'that only pointed at the page — it now plays in-site with the source found on this re-scrape.',
+      )
+    }
+    if (result.backfilled) {
+      lines.push(
+        `🖼 Filled missing details (poster/duration) on ${result.backfilled} ` +
+        `existing listing${result.backfilled === 1 ? '' : 's'}.`,
+      )
+    }
+    return send(env, chatId, `${lines.join('\n')}\n\nNothing new was published — check the video page.`)
+  }
   if (!drafts.length && result.duplicates) {
     return send(env, chatId,
-      `↩️ All ${result.duplicates} video${result.duplicates === 1 ? '' : 's'} on that page are already on the site or in drafts — nothing new to review.`)
+      `↩️ All ${result.duplicates} video${result.duplicates === 1 ? '' : 's'} on that page are already on the site or in drafts — nothing new to review.` +
+      (result.repaired || result.backfilled ? ' (Any stale page-only copies were repaired first.)' : ''))
   }
   if (drafts.length === 1) return sendDraftCard(env, chatId, drafts[0])
 
