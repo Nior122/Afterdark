@@ -544,6 +544,11 @@ async function main() {
   check('published via confirm button', editedMessages.at(-1)?.text.includes('Published'), JSON.stringify(editedMessages.at(-1)))
   feed = await feedOf(env)
   check('feed now has the scraped video', feed.length === 2)
+  check(
+    'feed order stays newest-first — the two-minute rotation lives in the site, not the API',
+    feed.every((video, i) => i === 0 || (feed[i - 1].createdAt ?? 0) >= (video.createdAt ?? 0)),
+    JSON.stringify(feed.map((video) => video.createdAt)),
+  )
   const scraped = feed.find((x) => x.title.startsWith('Hotel Hookup')) || {}
   check('scraped source is the mp4', scraped.sourceUrl === 'https://cdn.sometube.test/videos/hotel.mp4', JSON.stringify(scraped))
   check('scraped duration parsed', scraped.durationSec === 754, JSON.stringify(scraped.durationSec))

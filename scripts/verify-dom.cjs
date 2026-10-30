@@ -136,10 +136,49 @@ async function run() {
   const feedTitle = text.indexOf('Newest feed video')
   const seededTitle = text.indexOf('Sunday Sex Show 55')
   const oldTitle = text.indexOf('Older feed video 0')
-  check('latest: merged uploads sorted newest first', feedTitle >= 0 && seededTitle > feedTitle && oldTitle > seededTitle)
+  check('latest: uploads, feed and seeds all reach the page', feedTitle >= 0 && seededTitle >= 0 && oldTitle >= 0)
   check('latest: all catalogue videos shown', text.includes('Older feed video 9') && text.includes('Isabella Clark') && text.includes('Swimming Public Pool'))
   const latestSection = [...dom.window.document.querySelectorAll('section')].find((section) => section.querySelector('h2')?.textContent === 'Latest videos')
   check('latest: chronological grid reads across rows', Boolean(latestSection?.querySelector('.grid')))
+
+  // ---- the two-minute catalogue rotation (src/lib/reshuffle.ts) ----
+  const app = require(bundle)
+  const src = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']
+  const shuffled1 = app.seededShuffle(src, app.reshuffleBucket())
+  const shuffled2 = app.seededShuffle(src, app.reshuffleBucket())
+  check(
+    'rotation: one window, one order — and the input is never mutated',
+    shuffled1.join() === shuffled2.join() && src.join() === 'a,b,c,d,e,f,g,h,i,j,k,l',
+  )
+  check('rotation: the next window reshuffles', app.seededShuffle(src, app.reshuffleBucket() + 1).join() !== shuffled1.join())
+  check(
+    'rotation: windows tick on a fixed two-minute grid',
+    app.reshuffleBucket(0) === 0 && app.reshuffleBucket(119999) === 0 && app.reshuffleBucket(120000) === 1 &&
+      app.msUntilNextBucket(180000) === 60000,
+  )
+  // Each card links twice (cover + title) with adjacent identical hrefs —
+  // collapsing those leaves the grid's actual card order.
+  const idsIn = (section) => {
+    const hrefs = [...(section ? section.querySelectorAll('a[href*="/watch/"]') : [])].map((a) => a.getAttribute('href'))
+    return hrefs.filter((href, i) => href !== hrefs[i - 1])
+  }
+  const firstPass = idsIn(latestSection)
+  const bucketBefore = app.reshuffleBucket()
+  const domB = mountApp('/', 'public')
+  await wait(700)
+  const bucketAfter = app.reshuffleBucket()
+  const sectionB = [...domB.window.document.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Latest videos')
+  const secondPass = idsIn(sectionB)
+  check(
+    'rotation: reshuffle drops and duplicates nothing',
+    firstPass.length > 8 && new Set(firstPass).size === firstPass.length &&
+      firstPass.slice().sort().join() === secondPass.slice().sort().join(),
+    `${firstPass.length} vs ${secondPass.length} cards`,
+  )
+  check(
+    'rotation: fresh page loads agree inside a window',
+    bucketBefore !== bucketAfter || firstPass.join() === secondPass.join(),
+  )
   feedVideos = []
 
   dom = mountApp('/v/v-pov-tatum-christine/', 'direct')

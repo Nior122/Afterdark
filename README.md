@@ -253,7 +253,7 @@ baked into the build, so none of it needs a rebuild:
 
 | Route | Description |
 | --- | --- |
-| `/` | Home feed: latest videos, your videos (if any), and popular adult categories with counts |
+| `/` | Home feed: latest videos, your videos (if any), and popular adult categories with counts. The catalogue grids (home, browse, related) rotate through a deterministic reshuffle every 2 minutes — inside a window every visitor and every open tab sees the same order, then it flips for everyone at once, so old clips keep resurfacing; Trending and Explore keep their own rankings |
 | `/browse/:category` | Adult category feed (`POV`, `MILF`, `Big Tits`, `Blowjob`, …; matched by category or tag) |
 | `/explore` | Category tiles and discovery rows |
 | `/trending` | Videos sorted by view count |

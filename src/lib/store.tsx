@@ -20,6 +20,7 @@ import {
 import { fetchTelegramFeed } from './telegramFeed'
 import { deriveViews } from './stats'
 import { sortByNewest, videoAddedAt } from './catalogue'
+import { msUntilNextBucket, reshuffleBucket, seededShuffle } from './reshuffle'
 import { guessThumbnail, resolveSource, timeAgo } from './video'
 
 export interface NewVideoInput {
@@ -150,6 +151,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const ads = useMemo(() => [...RECOMMENDED_ADS, ...TRENDING_ADS], [])
+  // Catalogue rotation: the list order reshuffles on a fixed two-minute
+  // window (lib/reshuffle). The bucket — not a per-visitor random — drives
+  // the shuffle, so everyone sees the same order until the next boundary,
+  // and an open tab flips exactly when a fresh page load would.
+  const [shuffleBucket, setShuffleBucket] = useState(() => reshuffleBucket())
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const arm = () => {
+      timer = setTimeout(() => {
+        setShuffleBucket(reshuffleBucket())
+        arm()
+      }, msUntilNextBucket())
+    }
+    arm()
+    // A tab returning from the background re-syncs to the current window.
+    const resync = () => setShuffleBucket(reshuffleBucket())
+    document.addEventListener('visibilitychange', resync)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', resync)
+    }
+  }, [])
   const allVideos = useMemo(() => {
     const seen = new Set<string>()
     const merged: Video[] = []
@@ -158,11 +181,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       seen.add(video.id)
       merged.push(video)
     }
-    return sortByNewest(merged).map((video) => {
+    const ordered = sortByNewest(merged).map((video) => {
       const timestamp = videoAddedAt(video)
       return timestamp === null ? video : { ...video, publishedAt: timeAgo(timestamp) }
     })
-  }, [state.userVideos, remoteVideos])
+    return seededShuffle(ordered, shuffleBucket)
+  }, [state.userVideos, remoteVideos, shuffleBucket])
 
   const addVideo = useCallback((input: NewVideoInput) => {
     const source = resolveSource(input.videoUrl)
