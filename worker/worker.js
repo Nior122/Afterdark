@@ -53,6 +53,13 @@
  *                                 /start becomes the owner (stored in KV).
  *   Var     ALLOWED_CHANNEL_IDS   comma-separated channel IDs whose posts are
  *                                 auto-published when the bot is a channel admin.
+ *   Secrets GITHUB_TOKEN + Var/Secret GITHUB_REPO  enable the dashboard's
+ *                                 "Rebuild site" button AND the automatic,
+ *                                 debounced rebuild after every publish (keeps
+ *                                 sitemap.xml + static pages in step with the
+ *                                 catalogue). Var AUTO_REBUILD="off" vetoes the
+ *                                 automatic part; REBUILD_GAP_MS changes the
+ *                                 window (default 240000).
  *   Binding AI                    Workers AI (no API key). Enables the caption
  *                                 + hashtag agent for Telegram uploads.
  *   Var     CAPTION_AGENT         "off" disables the agent. HASHTAG_AGENT is
@@ -525,6 +532,111 @@ function adminAuthorised(request, env) {
   return constantTimeEqual(bearer, env.ADMIN_TOKEN)
 }
 
+/* ------------------------------ rebuild trigger -----------------------------
+ * The PRERENDERED pages and sitemap.xml only ever describe the catalogue as
+ * of the last build — so every publish, unpublish, repair or metadata edit
+ * that changes what search engines should see schedules a GitHub Pages
+ * rebuild, debounced so a bulk publish of 24 videos is ONE deploy, not 24:
+ * the first change fires immediately, later ones within the window set a
+ * queue flag, and that flag drains on the next bot activity or dashboard
+ * open once the window passed. The nightly Actions schedule is the backstop.
+ * On Cloudflare Pages this is a courtesy only — the middleware serves live
+ * indexable pages from the feed regardless of what was last built.
+ * -------------------------------------------------------------------------- */
+const REBUILD_KEY_LAST = 'rebuild:last'
+const REBUILD_KEY_QUEUE = 'rebuild:queued'
+const REBUILD_GAP_MS = 4 * 60 * 1000
+
+/** GITHUB_TOKEN + GITHUB_REPO make it possible; AUTO_REBUILD=off vetoes it. */
+function rebuildEnabled(env) {
+  return Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO)
+    && String(env.AUTO_REBUILD || '').trim().toLowerCase() !== 'off'
+}
+
+/** Fire the deploy workflow once. Never throws; returns { ok, detail }. */
+async function dispatchRebuildNow(env) {
+  const [owner, repo] = String(env.GITHUB_REPO || '').split('/')
+  if (!owner || !repo) return { ok: false, detail: 'GITHUB_REPO must be "owner/repo".' }
+  const workflow = env.GITHUB_WORKFLOW || 'deploy.yml'
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'afterdark-admin',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ref: env.GITHUB_BRANCH || 'main' }),
+        signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined,
+      },
+    )
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      return { ok: false, detail: `GitHub returned ${response.status}: ${detail.slice(0, 200)}` }
+    }
+    return { ok: true, detail: '' }
+  } catch (error) {
+    return { ok: false, detail: String(error?.message || error) }
+  }
+}
+
+async function scheduleRebuild(env) {
+  if (!rebuildEnabled(env)) return 'disabled'
+  const gap = Math.max(0, Number(env.REBUILD_GAP_MS) || REBUILD_GAP_MS)
+  const now = Date.now()
+  let last = 0
+  let queued = false
+  try {
+    last = Number(await env.VIDEOS.get(REBUILD_KEY_LAST)) || 0
+    queued = (await env.VIDEOS.get(REBUILD_KEY_QUEUE)) === '1'
+  } catch { /* unreadable clock — treat as fresh */ }
+  if (now - last < gap) {
+    if (!queued) {
+      try {
+        await env.VIDEOS.put(REBUILD_KEY_QUEUE, '1', { expirationTtl: 7 * 24 * 3600 })
+      } catch { /* the nightly schedule will still catch it */ }
+    }
+    return 'debounced'
+  }
+  // Claim the slot BEFORE dispatching (two near-simultaneous publishes should
+  // not both fire); a failed dispatch releases the claim and re-queues.
+  try {
+    await env.VIDEOS.delete(REBUILD_KEY_QUEUE)
+    await env.VIDEOS.put(REBUILD_KEY_LAST, String(now))
+  } catch { /* KV issues must not block the rebuild itself */ }
+  const result = await dispatchRebuildNow(env)
+  if (!result.ok) {
+    try {
+      await env.VIDEOS.delete(REBUILD_KEY_LAST)
+      await env.VIDEOS.put(REBUILD_KEY_QUEUE, '1', { expirationTtl: 7 * 24 * 3600 })
+    } catch { /* best effort */ }
+    return 'failed'
+  }
+  return 'dispatched'
+}
+
+/** Record a catalogue change; safe to await, cheap when disabled. */
+async function markCatalogChanged(env) {
+  try {
+    return await scheduleRebuild(env)
+  } catch {
+    return 'failed'
+  }
+}
+
+/** Publishes queue one rebuild; the next bot message or dashboard open pays. */
+async function drainQueuedRebuild(env) {
+  try {
+    if ((await env.VIDEOS.get(REBUILD_KEY_QUEUE)) !== '1') return 'idle'
+  } catch {
+    return 'idle'
+  }
+  return markCatalogChanged(env)
+}
+
 async function handleAdmin(request, env, url) {
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -612,6 +724,7 @@ async function handleAdmin(request, env, url) {
     // Opening the dashboard doubles as the self-heal step for the rare
     // stored-but-unindexed ("posted but nowhere") record.
     await reconcileIndex(env)
+    await drainQueuedRebuild(env)
     const ids = await readIndex(env)
     const [records, counts] = await Promise.all([
       Promise.all(ids.map((id) => readVideo(env, id))),
@@ -692,6 +805,7 @@ async function handleAdmin(request, env, url) {
       await env.VIDEOS.put(`v:${id}`, JSON.stringify(video))
       updated.push(id)
     }
+    if (updated.length) await markCatalogChanged(env)
     return json({ ok: true, updated, missing, category: body.category }, 200, cors)
   }
 
@@ -730,6 +844,7 @@ async function handleAdmin(request, env, url) {
     }
     existing.updatedAt = Date.now()
     await env.VIDEOS.put(`v:${id}`, JSON.stringify(existing))
+    await markCatalogChanged(env)
     return json({ ok: true, video: { id, ...existing } }, 200, cors)
   }
 
@@ -831,25 +946,16 @@ async function handleAdmin(request, env, url) {
         cors,
       )
     }
-    const [owner, repo] = String(env.GITHUB_REPO).split('/')
-    const workflow = env.GITHUB_WORKFLOW || 'deploy.yml'
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'afterdark-admin',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ref: env.GITHUB_BRANCH || 'main' }),
-      },
-    )
-    if (!response.ok) {
-      const detail = await response.text()
-      return json({ error: 'rebuild-failed', message: `GitHub returned ${response.status}: ${detail.slice(0, 200)}` }, 502, cors)
+    const result = await dispatchRebuildNow(env)
+    if (!result.ok) {
+      return json({ error: 'rebuild-failed', message: result.detail }, 502, cors)
     }
+    // A manual rebuild is a rebuild: reset the auto-debounce clock so the
+    // next publish does not immediately fire a second, redundant deploy.
+    try {
+      await env.VIDEOS.put(REBUILD_KEY_LAST, String(Date.now()))
+      await env.VIDEOS.delete(REBUILD_KEY_QUEUE)
+    } catch { /* clock is best effort */ }
     return json({ ok: true, message: 'Rebuild started. The sitemap updates in a minute or two.' }, 200, cors)
   }
 
@@ -868,6 +974,7 @@ async function settingsSnapshot(env, request) {
     updatedAt: Number(await env.VIDEOS.get('cfg:mode:at')) || null,
     adsUpdatedAt: Number(await env.VIDEOS.get('cfg:ads:at')) || null,
     github: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPO),
+    autoRebuild: rebuildEnabled(env),
     feedUrl: new URL(request.url).origin,
   }
 }
@@ -1064,6 +1171,9 @@ async function handleWebhook(request, env, ctx) {
 }
 
 async function processUpdate(update, env) {
+  // Changes that queued a rebuild while the bot sat idle get fired here,
+  // inside this already-backgrounded call — no visitor or owner pays for it.
+  await drainQueuedRebuild(env)
   if (update.callback_query) return processCallback(update.callback_query, env)
   if (update.message) return processMessage(update.message, env)
   if (update.channel_post) return processChannelPost(update.channel_post, env)
@@ -1367,6 +1477,7 @@ async function ingest(env, video, caption, source) {
   }
   await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
   await pushIndex(env, id)
+  await markCatalogChanged(env)
   return { duplicate: false, record }
 }
 
@@ -2015,7 +2126,7 @@ function firstKnownFrameEmbed(html, pageUrl) {
 
 /** Playable source for a scraped item: direct file, or an embeddable player. */
 function pickSourceUrl(candidates, pageUrl) {
-  for (const candidate of [...candidates, ...fallbackCandidates]) {
+  for (const candidate of candidates) {
     let url = String(candidate || '').trim()
     if (!url) continue
     // Protocol-relative values (`<iframe src="//www.player.test/embed/x">`)
@@ -2064,6 +2175,14 @@ const KNOWN_EMBED_HOSTS = [
     host: /^(?:videopress\.com|(?:videos?|w)\.wordpress\.com)$/i,
     watch: /\/v\/([A-Za-z0-9]+)/i,
     embed: (match) => `https://videopress.com/embed/${match[1]}`,
+  },
+  {
+    // XVideos — the other player mzansi-style blogs embed (watch link
+    // `/video<id>/<slug>`, or already-embedded `/embedframe/<id>`). Their
+    // embedframe is a real standalone player page.
+    host: /^xvideos\.com$/i,
+    watch: /\/(?:video(\d+)|embedframe\/(\d+))/i,
+    embed: (match) => `https://www.xvideos.com/embedframe/${match[1] || match[2]}`,
   },
 ]
 
@@ -2554,7 +2673,10 @@ function firstPosterImageUrl(html, pageUrl) {
     }
   }
 
-  for (const candidate of candidates) {
+  // Player-specific signals first (JSON-LD VideoObject, poster attributes,
+  // config scans); generic og:/twitter: meta only as FALLBACK — on blogs
+  // those are often just the site logo. Both lists must be consumed.
+  for (const candidate of [...candidates, ...fallbackCandidates]) {
     let value = decodeEntities(candidate).replace(/\\\//g, '/').trim();
     value = value.replace(/^url\(\s*["']?(.+?)["']?\s*\)$/i, '$1').replace(/^["']|["']$/g, '');
     if (!value || /^(?:data|blob|javascript):/i.test(value)) continue;
@@ -2743,6 +2865,11 @@ function scrapePage(html, pageUrl) {
 /** t.me/c/<id>/… (member-only), /+invite-hash and legacy /joinchat/ links. */
 const PRIVATE_TELEGRAM_LINK = /^https?:\/\/(?:www\.)?(?:t\.me|telegram\.dog)\/(?:c\/\d+|joinchat\/|\+)/i
 
+/** The embedded video no longer exists — wording used by blogs whose
+ * third-party embeds were deleted (Xvideos/VideoPress take-outs). */
+const DEAD_SOURCE_RE =
+  /(?:this|the)\s+(?:video|embed|content)\s+(?:has\s+been\s+|was\s+|is\s+)?(?:deleted|removed|unavailable|no\s+longer\s+available|not\s+available)/i
+
 async function createDraftsFromUrl(env, rawUrl) {
   const url = String(rawUrl || '').trim()
   if (!/^https?:\/\//i.test(url)) {
@@ -2787,7 +2914,10 @@ async function createDraftsFromUrl(env, rawUrl) {
   let parsed = null
   if (epornerId && embed) {
     const metadata = await fetchEpornerMetadata(epornerId)
-    const apiThumb = metadata?.default_thumb?.src ||
+    // Same priority as decorateEmbedItem: the watch-page poster first (it is
+    // the one signal that survives the API being down or rate-limited).
+    const apiThumb = metadata?._pageThumb ||
+      metadata?.default_thumb?.src ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '') ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.src)?.src : '')
     const durationSec = metadata?._pageDurationSec || parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
@@ -2901,6 +3031,20 @@ async function createDraftsFromUrl(env, rawUrl) {
         single.sourceKind = chased.sourceKind || chased.kind || 'embed'
         if (!single.thumbnail && chased.thumbnail) single.thumbnail = chased.thumbnail
         if (!single.durationSec && chased.durationSec) single.durationSec = chased.durationSec
+      }
+    }
+    // Still only the page — and the page itself says the video is GONE
+    // (mzansiadultblog keeps posts whose embedded video was deleted at the
+    // source: "This video has been deleted")? That is not a scraping
+    // failure; say so instead of filing a draft that can only ever show
+    // "cannot be embedded".
+    if (single && single.sourceKind === 'page' && DEAD_SOURCE_RE.test(page.html)) {
+      return {
+        error:
+          'There is nothing to import: the post itself says the video was deleted ' +
+          'or removed at its source (the blog keeps the page, the player is gone). ' +
+          'If this link was published here before, delete that entry (/remove <id> ' +
+          'or the dashboard) — no update can play a video that no longer exists upstream.',
       }
     }
   }
@@ -3024,6 +3168,10 @@ async function createDraftsFromUrl(env, rawUrl) {
   if (drafts.length) {
     await env.VIDEOS.put(`batch:${batchId}`, JSON.stringify(drafts.map((draft) => draft.id)))
   }
+
+  // Repairs and poster backfills change an ALREADY-PUBLISHED record's public
+  // metadata — the prerendered page and sitemap entry go stale right then.
+  if (repaired || backfilled) await markCatalogChanged(env)
 
   return { drafts, duplicates, repaired, backfilled, site: parsed.site, pageTitle: parsed.pageTitle }
 }
@@ -3245,6 +3393,7 @@ async function publishDraft(env, draft) {
   }
   await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
   await pushIndex(env, id)
+  await markCatalogChanged(env)
   return record
 }
 
@@ -3645,6 +3794,7 @@ async function removeVideo(env, id) {
   await env.VIDEOS.delete(`views:${id}`)
   const ids = (await readIndex(env)).filter((x) => x !== id)
   await env.VIDEOS.put('idx', JSON.stringify(ids))
+  await markCatalogChanged(env)
   return true
 }
 

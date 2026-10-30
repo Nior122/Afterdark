@@ -72,7 +72,8 @@ as much on page-only entries ("links added from the Create dialog are saved in t
 **Setting this up for the first time?** Follow
 [docs/cloudflare-setup-walkthrough.md](docs/cloudflare-setup-walkthrough.md) —
 the same steps as the bot guide, but slower, with checkpoints and a
-troubleshooting table.
+troubleshooting table. Submitting to Google Search Console (verification,
+sitemap, automatic rebuilds): [docs/google-search-console.md](docs/google-search-console.md).
 
 ## Two site modes (one switch)
 
@@ -139,17 +140,25 @@ Discovery never depends on internal links, in either mode:
 - `sitemap.xml` lists **every** video page with `<lastmod>` = the date it was added. It is
   generated at build time from the catalogue plus the bot feed, so it changes when videos are
   added or removed.
-- `robots.txt` is `User-agent: *` / `Allow: /` / `Sitemap: …/sitemap.xml` — nothing is blocked, and
-  crawlers get exactly the same HTML visitors get (no cloaking).
+- `robots.txt` is `User-agent: *` / `Allow: /` / `Disallow: /admin` / `Sitemap: …/sitemap.xml` —
+  the public catalogue is fully open, the admin console is kept out of the index, and crawlers get
+  exactly the same HTML visitors get (no cloaking).
 - Every `/v/<id>/` page is a real static file with its own `<title>`, meta description,
   `<meta name="robots" content="index, follow">`, canonical URL, Open Graph + Twitter cards
   (`summary_large_image`) and a schema.org `VideoObject` block (`name`, `description`,
   `thumbnailUrl`, `uploadDate`, `contentUrl`/`embedUrl`, `duration`).
 - `/`, the 404 shell and `/admin/` are `noindex` — the catalogue's hash routes are not per-video
-  URLs, so indexable content lives at the video URLs only.
+  URLs, so indexable content lives at the video URLs only. The shells are still `follow`, and
+  `/admin` is also disallowed in `robots.txt`; a `/v/<id>/` URL that no video owns answers a
+  real `404` instead of a soft one.
 
 New videos appear on their own URL immediately; they enter `sitemap.xml` after the next build,
-which the dashboard's **Rebuild site** button triggers.
+which the dashboard's **Rebuild site** button triggers — or which happens **by itself**: with
+the bot's `GITHUB_TOKEN`/`GITHUB_REPO` secrets set, every publish/unpublish/repair dispatches
+one debounced rebuild, a nightly workflow covers the quiet days, and on Cloudflare Pages a
+fresh video is indexable within the minute regardless (the middleware builds its head from the
+live feed). `VITE_GOOGLE_SITE_VERIFICATION` adds the Search Console meta tag to every page.
+Full guide: [docs/google-search-console.md](docs/google-search-console.md).
 
 ## Telegram bot publishing (optional)
 

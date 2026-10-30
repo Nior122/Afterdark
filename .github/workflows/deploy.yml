@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Nightly backstop: the bot's auto-rebuild trigger (docs/google-search-console.md)
+  # fires on publishes, but this guarantees sitemap.xml and the prerendered video
+  # pages refresh at least daily even when publishes came in through an older
+  # Worker or nothing triggered a deploy.
+  schedule:
+    - cron: '15 5 * * *' # 05:15 UTC
 
 permissions:
   contents: read

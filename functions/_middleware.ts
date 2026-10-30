@@ -21,9 +21,14 @@
  * browser-cached redirect can never lock the owner out of the site's controls.
  */
 
+// Same head the build writes (scripts/prerender.mjs) — one source of truth.
+// @ts-ignore — bundler resolves the .mjs; tsc never looks at this folder.
+import { applyHead, buildHead, feedToSeoVideo } from '../scripts/seo.mjs'
+
 interface Env {
   VITE_TELEGRAM_FEED_URL?: string
   TELEGRAM_FEED_URL?: string
+  VITE_SITE_URL?: string
   ASSETS?: { fetch: (input: Request | string, init?: RequestInit) => Promise<Response> }
 }
 
@@ -124,8 +129,69 @@ async function serveVideo(context: Context, url: URL): Promise<Response> {
   if (!assets) return response
   const shell = await assets.fetch(new URL('/v/_shell.html', url).toString())
   if (!shell.ok) return response
+  const shellHtml = await shell.text()
 
-  return new Response(shell.body, {
+  // A video published after the last build has no prerendered metadata.
+  // Ask the live feed once (cached for a minute): when it knows this id we
+  // inject the SAME title/canonical/JSON-LD a build would have written, so
+  // new videos are indexable from their first minute — when it knows nothing
+  // of the id, the URL genuinely does not exist and Google gets a real 404
+  // instead of a soft one. A feed that cannot be reached changes nothing.
+  let id = ''
+  try {
+    id = decodeURIComponent(url.pathname.replace(/^\/v\/+/, '').replace(/\/+$/, ''))
+  } catch {
+    id = ''
+  }
+  const origin = feedOrigin(context.env)
+  let feed: unknown[] | null = null
+  if (origin && id) {
+    try {
+      const res = await fetch(`${origin}/api/videos`, {
+        cf: { cacheTtl: CACHE_TTL_SECONDS, cacheEverything: true },
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(2500),
+      } as RequestInit)
+      if (res.ok) {
+        const data = await res.json()
+        feed = Array.isArray(data?.videos) ? data.videos : []
+      }
+    } catch {
+      feed = null
+    }
+  }
+
+  if (feed) {
+    const match = feed
+      .map((item) => feedToSeoVideo(item as any))
+      .find((video) => video && video.id === id)
+    if (match) {
+      // VITE_SITE_URL on the Pages project keeps canonicals pointed at the
+      // real domain even when the site is also reachable elsewhere.
+      const siteUrl = String(context.env.VITE_SITE_URL || '').trim() || url.origin
+      const head = buildHead(siteUrl, match, {})
+      const html = applyHead(shellHtml, head, {})
+      return new Response(context.request.method === 'HEAD' ? null : html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=60',
+        },
+      })
+    }
+    // Known feed, unknown id: a real 404 (the app still renders its
+    // not-found state from the body).
+    return new Response(context.request.method === 'HEAD' ? null : shellHtml, {
+      status: 404,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, follow',
+      },
+    })
+  }
+
+  return new Response(shellHtml, {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',

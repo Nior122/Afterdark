@@ -42,19 +42,20 @@ const check = (name, condition, extra = '') => {
 }
 
 /** Make a context; `next` returns 200 unless `missing` says 404. */
-function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true, slash308 = false } = {}) {
+function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true, slash308 = false, siteUrl = '' } = {}) {
   const url = `${SITE}${path}`
   return {
     request: new Request(url, { method, headers: { accept } }),
     env: {
       VITE_TELEGRAM_FEED_URL: WORKER,
+      VITE_SITE_URL: siteUrl,
       ASSETS: {
         fetch: async () =>
           shell
-            ? new Response('<!doctype html><html><body>SHELL</body></html>', {
-                status: 200,
-                headers: { 'Content-Type': 'text/html' },
-              })
+            ? new Response(
+                '<!doctype html><html><head><title>s</title><meta name="robots" content="noindex, follow" /></head><body>SHELL</body></html>',
+                { status: 200, headers: { 'Content-Type': 'text/html' } },
+              )
             : new Response('missing', { status: 404 }),
       },
     },
@@ -69,16 +70,20 @@ function context(path, { settings = null, accept = 'text/html', method = 'GET', 
 }
 
 const realFetch = globalThis.fetch
-function withSettings(settings) {
+function withSettings(settings, feed = 'fail') {
   globalThis.fetch = async (input) => {
     const url = String(input)
     if (url === `${WORKER}/api/settings`) return Response.json(settings)
+    if (url === `${WORKER}/api/videos`) {
+      if (feed === 'fail') return new Response('down', { status: 500 })
+      return Response.json({ videos: feed })
+    }
     return new Response('unexpected fetch ' + url, { status: 500 })
   }
 }
 
 const run = async (path, options) => {
-  withSettings(options?.settings ?? null)
+  withSettings(options?.settings ?? null, options?.feed)
   return onRequest(context(path, options))
 }
 
@@ -210,6 +215,54 @@ console.log('— no feed origin configured')
   }
   const response = await onRequest(bare)
   check('no Worker configured -> site behaves as before', response.status === 200)
+}
+
+// ------------------------------------------------ live SEO head for new videos ----
+console.log('— live SEO head for videos published after the last build')
+{
+  const settings = { mode: 'public', redirectUrl: '', ads: { enabled: false } }
+  const feed = [
+    {
+      id: 'w-fresh-clip',
+      title: 'Fresh Clip',
+      category: 'Amateur',
+      description: 'Posted minutes ago.',
+      thumbUrl: 'https://worker.test/api/videos/w-fresh-clip/thumb.jpg',
+      streamUrl: 'https://worker.test/api/videos/w-fresh-clip/stream.mp4',
+      sourceUrl: 'https://blog.test/fresh.mp4',
+      sourceKind: 'file',
+      durationSec: 61,
+      views: 7,
+      createdAt: Date.UTC(2026, 9, 30),
+    },
+  ]
+  const page = await run('/v/w-fresh-clip/', { settings, missing: ['/v/w-fresh-clip/'], feed })
+  const html = await page.text()
+  check('unbuilt video page answers 200', page.status === 200, `${page.status}`)
+  check('live page gets the video title', /<title>Fresh Clip — AfterDark<\/title>/.test(html), html.slice(0, 300))
+  check('live page is indexable', /content="index, follow/.test(html), html.slice(0, 400))
+  check('the noindex header is gone on a real video page', !page.headers.get('x-robots-tag'))
+  check('canonical points at the video URL', html.includes(`href="${SITE}/v/w-fresh-clip/"`))
+  check('VideoObject JSON-LD is injected with real views', html.includes('"@type":"VideoObject"') && html.includes('"userInteractionCount":7'))
+  check('OG block carries the proxied poster', html.includes('property="og:image" content="https://worker.test/api/videos/w-fresh-clip/thumb.jpg"'))
+  check('live pages revalidate within the minute', (page.headers.get('cache-control') || '').includes('max-age=60'))
+
+  const missingId = await run('/v/w-nope-nope/', { settings, missing: ['/v/w-nope-nope/'], feed })
+  check('an id the live feed does not know gets a real 404', missingId.status === 404, `${missingId.status}`)
+
+  const offline = await run('/v/w-fresh-clip/', { settings, missing: ['/v/w-fresh-clip/'] })
+  check('feed unreachable -> old shell, noindex, never a false 404', offline.status === 200 && (offline.headers.get('x-robots-tag') || '').includes('noindex'))
+
+  const custom = await run('/v/w-fresh-clip/', {
+    settings,
+    missing: ['/v/w-fresh-clip/'],
+    feed,
+    siteUrl: 'https://afterdark.example',
+  })
+  check(
+    'VITE_SITE_URL pins the canonical even when served from a preview origin',
+    (await custom.text()).includes('href="https://afterdark.example/v/w-fresh-clip/"'),
+  )
 }
 
 globalThis.fetch = realFetch

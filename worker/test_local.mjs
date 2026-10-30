@@ -143,6 +143,14 @@ const CHASE_TARGET = `<!doctype html><html><head><title>Chased Clip — Player</
 
 /** Headers the media proxy sent upstream, for Referer/Range assertions. */
 const proxiedUpstream = []
+/** Bodies of simulated GitHub workflow_dispatch calls (auto-rebuild tests). */
+const rebuildDispatches = []
+// mzansiadultblog reality for old reposts: the post stands, the embedded
+// clip is gone at the source, and the page SAYS so.
+const DEAD_REPOST_PAGE = `<!doctype html><html><head><title>Wow Look At That Ass</title></head>
+<body><div class="video-wrapper"><h3>This video has been deleted</h3>
+<p>Xvideos.com embed video</p>
+<a href="https://www.xvideos.com/">Watch more porn</a></div></body></html>`
 
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
@@ -239,6 +247,30 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u === 'https://www.eporner.com/video-CqzTB8dIhZD/viral-couple/') {
     // Eporner's anti-bot wall: the worker never gets the player config.
     return new Response('Just a moment...', { status: 403, headers: { 'Content-Type': 'text/html' } })
+  }
+  // The metadata-recovery path the worker falls back to: bare watch page (this
+  // id answers, others stay walled) and the API (down — must not hang).
+  if (u === 'https://www.eporner.com/video-CqzTB8dIhZD/') {
+    return new Response(EPORNER_EMBED_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (/^https:\/\/www\.eporner\.com\/video-[^/]+\/$/.test(u)) {
+    return new Response('Just a moment...', { status: 403, headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u.startsWith('https://www.eporner.com/api/v2/')) {
+    return new Response('nope', { status: 500 })
+  }
+  if (u === 'https://www.xvideos.com/video49952353/hot-clip') {
+    return new Response('blocked', { status: 403, headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://www.xvideos.com/embedframe/49952353') {
+    return new Response('<!doctype html><html><head><title>Hot Clip</title></head><body>player</body></html>', { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://mzansi.test/dead-repost/') {
+    return new Response(DEAD_REPOST_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://api.github.com/repos/RBOWNER/RB/actions/workflows/deploy.yml/dispatches') {
+    rebuildDispatches.push(JSON.parse(opts.body || '{}'))
+    return new Response('', { status: 202 })
   }
   if (u === 'https://www.eporner.com/video-ABC123xyz/some-other-clip/') {
     return new Response(BAR_EPORNER_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -1249,6 +1281,82 @@ async function main() {
     const raw = await env.VIDEOS.get('idx')
     await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-orphaned')))
   }
+
+  // ---- XVideos (mzansi's other player) resolves to its embedframe ----
+  const xvideoBody = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://www.xvideos.com/video49952353/hot-clip' }),
+  })).json()
+  check(
+    'xvideos watch link becomes its embedframe player',
+    xvideoBody.drafts?.[0]?.sourceKind === 'embed'
+      && xvideoBody.drafts?.[0]?.sourceUrl === 'https://www.xvideos.com/embedframe/49952353',
+    JSON.stringify({ k: xvideoBody.drafts?.[0]?.sourceKind, s: xvideoBody.drafts?.[0]?.sourceUrl }),
+  )
+  await admin(`drafts/${xvideoBody.drafts[0].id}`, { method: 'DELETE', headers: auth })
+
+  // ---- deleted-at-source post: refuse with a reason, no broken listing ----
+  const deadRes = await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://mzansi.test/dead-repost/' }),
+  })
+  const deadBody = await deadRes.json()
+  check(
+    'a post whose video was deleted upstream is refused with an explanation',
+    deadRes.status === 422 && /deleted/i.test(deadBody.message || '') && !deadBody.drafts,
+    JSON.stringify(deadBody),
+  )
+
+  // ---- automatic sitemap rebuild: one debounced deploy per change burst ----
+  rebuildDispatches.length = 0
+  const rbEnv = { ...env, ADMIN_TOKEN: 'admin-secret', GITHUB_TOKEN: 'gh', GITHUB_REPO: 'RBOWNER/RB', REBUILD_GAP_MS: '900000' }
+  const rb = (e, path, opts = {}) =>
+    call(e, `https://worker.test/api/admin/${path}`, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer admin-secret', ...(opts.headers || {}) },
+    })
+  const seedRbDraft = async (draftId, sourceUrl) => {
+    await env.VIDEOS.put(`draft:${draftId}`, JSON.stringify({
+      id: draftId, title: `Rebuild ${draftId}`, category: 'POV', tags: [],
+      description: '', site: 'rb.test', sourceUrl, sourceKind: 'file', thumbUrl: '',
+      durationSec: 12, createdAt: Date.now(), pageUrl: 'https://rb.test/one/',
+    }))
+  }
+  await seedRbDraft('d-rb1', 'https://rb.test/one.mp4')
+  const rbPub1 = await (await rb(rbEnv, 'drafts/d-rb1/publish', { method: 'POST' })).json()
+  check(
+    'first publish after a quiet period dispatches one rebuild',
+    rbPub1.ok && rebuildDispatches.length === 1 && rebuildDispatches[0].ref === 'main',
+    JSON.stringify({ n: rebuildDispatches.length, body: rebuildDispatches[0] }),
+  )
+  await seedRbDraft('d-rb2', 'https://rb.test/two.mp4')
+  await rb(rbEnv, 'drafts/d-rb2/publish', { method: 'POST' })
+  check(
+    'publishes inside the debounce window share ONE deploy',
+    rebuildDispatches.length === 1 && (await env.VIDEOS.get('rebuild:queued')) === '1',
+    JSON.stringify({ n: rebuildDispatches.length }),
+  )
+  await rb(rbEnv, 'rebuild', { method: 'POST' })
+  check(
+    'manual rebuild also clears the queue and resets the clock',
+    rebuildDispatches.length === 2 && (await env.VIDEOS.get('rebuild:queued')) === null,
+    JSON.stringify({ n: rebuildDispatches.length }),
+  )
+  await seedRbDraft('d-rb3', 'https://rb.test/three.mp4')
+  await rb(rbEnv, 'drafts/d-rb3/publish', { method: 'POST' })
+  check('windowed publish queues again without firing', rebuildDispatches.length === 2)
+  await env.VIDEOS.put('rebuild:last', '0') // pretend the window has passed
+  await rb(rbEnv, 'videos')
+  check(
+    'opening the dashboard drains the queued rebuild',
+    rebuildDispatches.length === 3 && (await env.VIDEOS.get('rebuild:queued')) === null,
+    JSON.stringify({ n: rebuildDispatches.length }),
+  )
+  await seedRbDraft('d-rb4', 'https://rb.test/four.mp4')
+  await rb({ ...rbEnv, AUTO_REBUILD: 'off' }, 'drafts/d-rb4/publish', { method: 'POST' })
+  check('AUTO_REBUILD=off vetoes the trigger', rebuildDispatches.length === 3)
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
