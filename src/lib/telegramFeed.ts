@@ -82,6 +82,9 @@ export function mapFeedVideo(v: FeedVideo): Video {
     duration,
     views: counted !== null ? formatViews(counted) : deriveViews(v.id, v.createdAt),
     publishedAt: v.createdAt ? timeAgo(v.createdAt) : 'Just now',
+    addedAt: v.createdAt && Number.isFinite(v.createdAt) && Number.isFinite(new Date(v.createdAt).getTime())
+      ? new Date(v.createdAt).toISOString()
+      : undefined,
     channelId: '',
     category,
     videoUrl: v.streamUrl || v.sourceUrl,

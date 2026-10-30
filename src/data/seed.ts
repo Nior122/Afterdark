@@ -18,7 +18,7 @@ export interface Video {
   views: string
   /** Display-only relative age ("2 months ago"), also shown on cards. */
   publishedAt: string
-  /** ISO date (YYYY-MM-DD) the video was added — sitemap <lastmod>, schema uploadDate. */
+  /** ISO date or timestamp when the video was added — ordering, sitemap and schema uploadDate. */
   addedAt?: string
   channelId: string
   category: string
@@ -357,7 +357,7 @@ export const SEED_VIDEOS: Video[] = [
     duration: '12:01',
     views: '0 views',
     publishedAt: 'Just added',
-    addedAt: '2026-10-30',
+    addedAt: '2026-10-30T09:26:32Z',
     channelId: '',
     category: 'Homemade',
     videoUrl: 'https://www.eporner.com/embed/FLYDkTYmsaz/',
@@ -376,7 +376,7 @@ export const SEED_VIDEOS: Video[] = [
     duration: '6:26',
     views: '0 views',
     publishedAt: 'Just added',
-    addedAt: '2026-10-30',
+    addedAt: '2026-10-30T09:26:32Z',
     channelId: '',
     category: 'Homemade',
     videoUrl: 'https://www.eporner.com/embed/f6rgPs3Li8w/',
@@ -395,7 +395,7 @@ export const SEED_VIDEOS: Video[] = [
     duration: '9:11',
     views: '0 views',
     publishedAt: 'Just added',
-    addedAt: '2026-10-30',
+    addedAt: '2026-10-30T09:26:32Z',
     channelId: '',
     category: 'Homemade',
     videoUrl: 'https://www.eporner.com/embed/weRIQSlrEHx/',

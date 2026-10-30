@@ -19,7 +19,8 @@ import {
 } from '../data/seed'
 import { fetchTelegramFeed } from './telegramFeed'
 import { deriveViews } from './stats'
-import { guessThumbnail, resolveSource } from './video'
+import { sortByNewest, videoAddedAt } from './catalogue'
+import { guessThumbnail, resolveSource, timeAgo } from './video'
 
 export interface NewVideoInput {
   title: string
@@ -157,7 +158,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       seen.add(video.id)
       merged.push(video)
     }
-    return merged
+    return sortByNewest(merged).map((video) => {
+      const timestamp = videoAddedAt(video)
+      return timestamp === null ? video : { ...video, publishedAt: timeAgo(timestamp) }
+    })
   }, [state.userVideos, remoteVideos])
 
   const addVideo = useCallback((input: NewVideoInput) => {
@@ -175,6 +179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       duration: input.duration?.trim() || '—',
       views: deriveViews(id),
       publishedAt: 'Just now',
+      addedAt: new Date().toISOString(),
       channelId: input.channelId,
       category: input.category,
       description: input.description?.trim() || undefined,
