@@ -153,11 +153,13 @@ Discovery never depends on internal links, in either mode:
   real `404` instead of a soft one.
 
 New videos appear on their own URL immediately; they enter `sitemap.xml` after the next build,
-which the dashboard's **Rebuild site** button triggers — or which happens **by itself**: with
-the bot's `GITHUB_TOKEN`/`GITHUB_REPO` secrets set, every publish/unpublish/repair dispatches
-one debounced rebuild, a nightly workflow covers the quiet days, and on Cloudflare Pages a
-fresh video is indexable within the minute regardless (the middleware builds its head from the
-live feed). `VITE_GOOGLE_SITE_VERIFICATION` adds the Search Console meta tag to every page.
+which the dashboard's **Rebuild site** button triggers — or which happens **by itself**: with a
+rebuild target configured on the Worker (`GITHUB_TOKEN`/`GITHUB_REPO` for GitHub Pages,
+`CLOUDFLARE_BUILD_HOOK` for a Cloudflare Pages build hook — either or both), every
+publish/unpublish/repair dispatches one debounced rebuild; a nightly workflow covers the GitHub
+copy on quiet days, and on Cloudflare Pages a fresh video is indexable within the minute
+regardless (the middleware builds its head from the live feed). `VITE_GOOGLE_SITE_VERIFICATION`
+adds the Search Console meta tag to every page.
 Full guide: [docs/google-search-console.md](docs/google-search-console.md).
 
 ## Telegram bot publishing (optional)
