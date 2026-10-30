@@ -151,6 +151,21 @@ Paste a link (or `/add <link>`) and the bot scrapes the page:
   HTML hides the file behind escaped/encoded markup, the Worker also asks the
   site's public WordPress REST API (`/wp-json/wp/v2/posts?slug=…`) — that
   usually carries the raw post content with the `.mp4` and the real poster.
+- **VideoPress and other player iframes** → WordPress.com-hosted video
+  (`videopress.com/v/<id>`, the usual player on `…-wordpress-com` reposts)
+  maps straight to the stable `videopress.com/embed/<id>` player. If a page
+  still yields no playable source, the Worker follows the post's most
+  player-looking `<iframe>` (up to two, known tubes first) and scrapes *that*
+  target — a file inside the player page upgrades the draft to a real
+  `.mp4`. This is why "This link cannot be embedded here" keeps getting rarer:
+  the record stops pointing at a page.
+- **Playback goes through the Worker** → for scraped `.mp4` records the feed
+  offers `…/api/videos/<id>/stream.mp4` (and the same for posters, as
+  `thumb.jpg`) instead of the raw CDN URL. The Worker refetches the file with
+  a browser User-Agent and the source site as Referer, forwarding Range
+  requests — so CDNs that block direct playback from `afterdark` (the
+  "broken link / no video when I press play" case) still play, and nothing
+  visitor-visible exposes the file host.
 - **Re-paste = repair** → if an old listing for that exact page was published
   before these rescues existed (it only pointed at the page and never
   played), re-sending the link **fixes the existing record in place** — source,
@@ -283,13 +298,14 @@ to appear on the site automatically:
 | --- | --- |
 | Bot never replies | Redo Step 5 (check for typos). Verify with `https://api.telegram.org/bot<TOKEN>/getWebhookInfo` — `url` must be your Worker URL. |
 | "🚫 You are not authorised" | Someone else sent `/start` first, or you use a second account. Send `/id`, then set a Worker variable `ALLOWED_USER_IDS` to your ID and deploy. |
-| Bot says posted, site doesn't show it | Wait ~1 minute; make sure Step 7's variable is set and the site was redeployed **after** setting it. Check `https://<YOUR_WORKER>.workers.dev/api/videos` in a browser — the video should be listed there. |
+| Bot says posted, site doesn't show it | Wait ~1 minute; make sure Step 7's variable is set and the site was redeployed **after** setting it. Check `https://<YOUR_WORKER>.workers.dev/api/videos` in a browser — the video should be listed there. If the bot said *Published* but the video is missing from both the site **and** the admin panel, the record was stored while its index write was lost (KV is not transactional): open `https://<SITE>/admin/` once — the dashboard re-indexes stored-but-unlisted videos on load, and the current Worker verifies every index write as it goes. Older Workers never self-heal: redeploy `worker/worker.js` first, then open the dashboard. |
 | "I could not read that page" | The site blocked the Worker (403/Cloudflare challenge/JS-only). Paste the direct embed link, forward the file, or use a public `t.me` post. |
 | Scraped video has the wrong title | Press ✏️ Edit title on the draft card before publishing, or /rename the id afterwards. |
 | Wrong category | 🏷 Category on the draft card; re-infer it from the page's keywords if they were unclear. |
 | Dashboard says "admin-disabled" | Set the `ADMIN_TOKEN` secret on the Worker and redeploy. |
 | New video isn't in sitemap.xml yet | The sitemap is generated at build time. Press **Rebuild site** in the dashboard (or re-run the deploy workflow) after publishing. Direct links work immediately either way. |
-| Video page says “This link cannot be embedded here” with an “Open original” button | The stored record points at a page, not a playable file — either it was added via the site's Create dialog (browser-local scratchpad, not a publish path), or it was scraped before the player-config parser existed. Delete the entry, then re-send the same link to the bot / Scrape panel on the updated Worker: it now reads `sources:[{file:"…mp4"}]` JS configs (Fluid Player etc.) and stores the file itself. If the blog exposes no direct file at all, “Open original” is the intended behaviour. |
+| Video page says “This link cannot be embedded here” with an “Open original” button | The stored record points at a page, not a playable file — either it was added via the site's Create dialog (browser-local scratchpad, not a publish path), or it was scraped before the player-config parser existed. Delete the entry, then re-send the same link to the bot / Scrape panel on the updated Worker: it now reads `sources:[{file:"…mp4"}]` JS configs (Fluid Player etc.), VideoPress/known-tube iframes, and even chases unknown player iframes to their file, and stores whatever playable source it finds. If the blog exposes no direct file at all, “Open original” is the intended behaviour. |
+| Scraped video opens but **play is broken** (“no video to play”, black player) | The blog's CDN serves the file only to its own site (hotlink protection) — a raw link from `afterdark` gets refused. On the current Worker this is already handled: scraped files and posters play through `…/api/videos/<id>/stream.mp4` / `thumb.jpg` with the source site's Referer. If you still see it, the Worker is stale — paste `worker/worker.js` into it, **Save and Deploy**, then open the video again (no re-publish needed; old records start working once the Worker proxies them). |
 | Telegram video shows `0:00`, or a vertical clip looks cropped in the grid | The published record predates duration/shape scraping, or the Worker is stale. Redeploy the Worker from `worker/worker.js` (dashboard paste → Save and Deploy), then delete the video and re-add its `t.me` link — the new scrape stores the real duration and the portrait dimensions, and the site draws portrait cards with an intact (letterboxed) thumbnail and a timestamp badge. No site rebuild is needed for the shape; press **Rebuild site** to refresh the prerendered page text |
 | Video links stay the old way after a mode switch | A `/v/<id>/` link open **before** a switch keeps its last paint until the tab refetches settings. It now follows the mode live: on a switch to public the video page hops to the full watch experience (and back to the standalone page on a switch to direct), on mount, on tab focus, and whenever the page regains visibility. |
 | Mode switch seems ignored | Check two things. (1) `VITE_TELEGRAM_FEED_URL` must be set for the **site** build — without it the site has no Worker to ask. (2) The **Worker must be at least as new as the dashboard**: an older Worker accepts the save and echoes the *old* value, so nothing persists — the dashboard now catches this with a "This Worker predates the dashboard" banner and reports "The Worker did not save the site mode" on the toggle itself. Instant workaround that works on any Worker with a mode: send `/mode public` (or `/mode direct`) to the bot. Permanent fix: redeploy `worker/worker.js`. Confirm with `https://<YOUR_WORKER>.workers.dev/api/settings` — `mode` should flip within a minute. |

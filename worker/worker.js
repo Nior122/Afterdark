@@ -29,8 +29,13 @@
  *   POST /telegram/webhook         Telegram updates (messages, channel posts, buttons)
  *   GET  /api/videos               Public feed consumed by the website (includes `views`)
  *   POST /api/videos/:id/view      Count a video view (deduped per browser session)
- *   GET  /api/videos/:id/stream.mp4  Video stream proxy (Range supported)
- *   GET  /api/videos/:id/thumb.jpg   Thumbnail proxy (the video's real poster)
+ *   GET  /api/videos/:id/stream.mp4  Media stream proxy (Range supported). Also
+ *                                    plays scraped external .mp4 files through
+ *                                    the Worker (browser headers + source-site
+ *                                    Referer) so hotlink protection can't
+ *                                    break playback; embeds keep their player URL.
+ *   GET  /api/videos/:id/thumb.jpg   Thumbnail proxy (the video's real poster,
+ *                                    external posters proxied for the same reason)
  *   GET  /api/settings             Runtime site config: mode, redirect, ads
  *   /api/admin/*                   Dashboard API (Bearer ADMIN_TOKEN): videos incl.
  *                                  view counts, bulk delete/recategorise, drafts,
@@ -244,10 +249,17 @@ async function handleFeed(env, origin) {
         // videos never look dead.
         views: viewsById.get(v.id) || 0,
         sourceUrl: isLink ? v.sourceUrl : null,
-        streamUrl: isLink ? null : `${origin}/api/videos/${v.id}/stream.mp4`,
-        thumbUrl: v.thumbFileId
+        // Scraped direct files stream through the same proxy as Telegram
+        // uploads: blogs with hotlink protection 403 a visitor's <video>
+        // request (or choke on mixed content), but accept the Worker's
+        // browser-like fetch. Range-aware, so seeking is unaffected.
+        streamUrl: mediaStreamUrl(v, origin),
+        // Posters are proxied for the same reason — the same CDN that blocks
+        // the video usually blocks the image too, and a 403 poster renders a
+        // broken card on every grid.
+        thumbUrl: v.thumbFileId || (isLink && v.thumbUrl)
           ? `${origin}/api/videos/${v.id}/thumb.jpg`
-          : v.thumbUrl || null,
+          : null,
       }
     })
   return new Response(JSON.stringify({ videos }), {
@@ -597,6 +609,9 @@ async function handleAdmin(request, env, url) {
 
   // --- videos ------------------------------------------------------------
   if (path === 'videos' && method === 'GET') {
+    // Opening the dashboard doubles as the self-heal step for the rare
+    // stored-but-unindexed ("posted but nowhere") record.
+    await reconcileIndex(env)
     const ids = await readIndex(env)
     const [records, counts] = await Promise.all([
       Promise.all(ids.map((id) => readVideo(env, id))),
@@ -618,10 +633,10 @@ async function handleAdmin(request, env, url) {
           tooLarge: Boolean(video.tooLarge),
           views: viewsById.get(video.id) || 0,
           sourceUrl: video.sourceUrl || null,
-          thumbUrl: video.thumbFileId
+          thumbUrl: video.thumbFileId || (video.kind === 'link' && video.thumbUrl)
             ? `${url.origin}/api/videos/${video.id}/thumb.jpg`
-            : video.thumbUrl || null,
-          streamUrl: video.kind === 'link' ? null : `${url.origin}/api/videos/${video.id}/stream.mp4`,
+            : null,
+          streamUrl: mediaStreamUrl(video, url.origin),
           description: video.description || '',
           site: video.site || '',
           captionSource: video.captionAgent?.source || 'legacy',
@@ -869,11 +884,39 @@ async function listDrafts(env) {
 
 /* --------------------------- media proxying ------------------------------ */
 
+/**
+ * Where the site should fetch a record's video from. Telegram files always
+ * stream through this Worker. Link records normally play from their origin,
+ * except resolved direct `.mp4` files — those also stream through here, with
+ * browser headers + a source-site Referer on the upstream fetch, because
+ * exactly the blogs that obfuscate their download links tend to hotlink-
+ * block the visitor's player. Embeds cannot be proxied (they are iframes)
+ * and keep their player URL.
+ */
+function mediaStreamUrl(video, origin) {
+  if (video.kind !== 'link') return `${origin}/api/videos/${video.id}/stream.mp4`
+  return video.sourceKind === 'file' && video.sourceUrl
+    ? `${origin}/api/videos/${video.id}/stream.mp4`
+    : null
+}
+
 async function handleMedia(env, id, kind, request) {
   const video = await readVideo(env, id)
   if (!video) return new Response('Not found', { status: 404 })
   const fileId = kind === 'video' ? video.fileId : video.thumbFileId
-  if (!fileId) return new Response('Not found', { status: 404 })
+  if (!fileId) {
+    // Link records: stream their external file/poster through us instead.
+    const externalUrl =
+      video.kind === 'link'
+        ? kind === 'video' && video.sourceKind === 'file'
+          ? video.sourceUrl
+          : kind === 'thumb'
+            ? video.thumbUrl
+            : ''
+        : ''
+    if (externalUrl) return proxyExternalMedia(externalUrl, video, request, kind)
+    return new Response('Not found', { status: 404 })
+  }
 
   const upstream = await fetchTelegramFile(env, fileId, request)
   if (!upstream) return new Response('Upstream error', { status: 502 })
@@ -889,6 +932,84 @@ async function handleMedia(env, id, kind, request) {
     if (v) headers.set(h, v)
   }
   return new Response(upstream.body, { status: upstream.status, headers })
+}
+
+/**
+ * Fetch an external media URL (a scraped file or its poster) and stream it
+ * back with the visitor's Range header forwarded. The Referer is set to the
+ * source site (falling back to the file's own host) and the User-Agent is a
+ * normal browser — the two checks hotlink protection actually looks at.
+ * Guarded so a bad record can never turn this into a fetch against the
+ * Worker/site itself or private address space.
+ */
+async function proxyExternalMedia(rawUrl, video, request, kind) {
+  const refuse = () =>
+    new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } })
+  let target
+  try {
+    target = new URL(String(rawUrl || ''))
+  } catch {
+    return refuse()
+  }
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') return refuse()
+  const host = target.hostname.toLowerCase()
+  let ownHost = ''
+  try {
+    ownHost = new URL(request.url).hostname.toLowerCase()
+  } catch {
+    ownHost = ''
+  }
+  if (
+    (ownHost && host === ownHost) ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    /^(?:127\.|0\.|\[?::|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host)
+  ) {
+    return refuse()
+  }
+  const headers = {
+    'User-Agent': USER_AGENT,
+    Accept: kind === 'video' ? '*/*' : 'image/avif,image/webp,image/*,*/*;q=0.8',
+  }
+  // Hotlink checks usually validate the SOURCE SITE's referer, not the CDN's
+  // own host — so prefer the recorded page host, then any host-shaped `site`
+  // (og:site_name is often a display name, which is useless here), then the
+  // file host itself.
+  const hostShape = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+  const refererSite =
+    (hostShape.test(String(video.pageHost || '')) && video.pageHost) ||
+    (hostShape.test(String(video.site || '')) && video.site) ||
+    host
+  headers.Referer = `https://${refererSite}/`
+  const range = request.headers.get('range')
+  if (range) headers.Range = range
+  let upstream
+  try {
+    upstream = await fetch(target.toString(), { headers, redirect: 'follow' })
+  } catch {
+    return new Response('Unavailable', {
+      status: 502,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
+    })
+  }
+  if (!upstream.ok && upstream.status !== 206) {
+    return new Response('Unavailable', {
+      status: 502,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
+    })
+  }
+  const out = new Headers()
+  out.set('Content-Type', upstream.headers.get('content-type') || (kind === 'video' ? 'video/mp4' : 'image/jpeg'))
+  out.set('Access-Control-Allow-Origin', '*')
+  // Videos must not sit in a shared cache with a Range half-written; posters
+  // are immutable enough to cache for a day like Telegram thumbs.
+  out.set('Cache-Control', kind === 'video' ? 'no-store' : 'public, max-age=86400')
+  if (kind === 'video') out.set('Accept-Ranges', 'bytes')
+  for (const h of ['content-length', 'content-range']) {
+    const value = upstream.headers.get(h)
+    if (value) out.set(h, value)
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: out })
 }
 
 async function fetchTelegramFile(env, fileId, request, allowRetry = true) {
@@ -1245,9 +1366,7 @@ async function ingest(env, video, caption, source) {
     hashtagAgent: agent.hashtagMeta,
   }
   await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
-  const ids = await readIndex(env)
-  ids.unshift(id)
-  await env.VIDEOS.put('idx', JSON.stringify(ids.slice(0, MAX_INDEX)))
+  await pushIndex(env, id)
   return { duplicate: false, record }
 }
 
@@ -1920,6 +2039,15 @@ const KNOWN_EMBED_HOSTS = [
     watch: /\/(?:video|embed)\/(\d+)/i,
     embed: (match) => `https://www.iceporn.com/embed/${match[1]}`,
   },
+  {
+    // VideoPress — how WordPress.com hosts video. Free WP blogs and the
+    // blogs that mirror them embed `videopress.com/v/<id>` iframes; the same
+    // media embeds at /embed/<id>. (mzansiadultblog posts with
+    // `…-wordpress-com` slugs are exactly this.)
+    host: /^(?:videopress\.com|(?:videos?|w)\.wordpress\.com)$/i,
+    watch: /\/v\/([A-Za-z0-9]+)/i,
+    embed: (match) => `https://videopress.com/embed/${match[1]}`,
+  },
 ]
 
 /** Embed URL derived from a watch link on a known tube, or null. */
@@ -2063,6 +2191,57 @@ async function decorateEmbedItem(item) {
   } catch {
     /* decoration is optional — playback never depends on it */
   }
+}
+
+/**
+ * Last generic try for posts that only embed a third-party player page:
+ * follow the most player-looking `<iframe>` on the post and run the whole
+ * scrape pipeline against that target — tubes with known embeds resolve
+ * without even fetching, everything else gets one fetch. Capped at two
+ * frames, same-origin and non-http frames skipped, so this can neither
+ * recurse nor hammer the publisher.
+ */
+async function chaseIframePlayer(html, pageUrl) {
+  let origin = ''
+  try {
+    origin = new URL(pageUrl).origin
+  } catch {
+    return null
+  }
+  const srcs = [...String(html || '').matchAll(/<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi)]
+    .map((match) => decodeEntities(match[1]).trim())
+    .filter((src) => src && !/^(?:javascript|data|blob):/i.test(src))
+  const scored = srcs
+    .map((src) => ({ src, rank: /video|player|embed|media|watch|press/i.test(src) ? 0 : 1 }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 2)
+  for (const { src } of scored) {
+    let absolute = ''
+    try {
+      absolute = new URL(src, pageUrl).toString()
+    } catch {
+      continue
+    }
+    if (absolute.startsWith(origin)) continue
+    const known = knownEmbedFor(absolute)
+    if (known) return known
+    let decoded = ''
+    try {
+      decoded = decodeURIComponent(absolute)
+    } catch {
+      decoded = ''
+    }
+    if (decoded && decoded !== absolute) {
+      const viaRedirect = knownEmbedFor(decoded)
+      if (viaRedirect) return viaRedirect
+    }
+    const inner = await fetchPage(absolute)
+    if (inner.error) continue
+    const innerParsed = scrapePage(inner.html, inner.finalUrl || absolute)
+    const playable = innerParsed.items.find((item) => item.sourceKind && item.sourceKind !== 'page')
+    if (playable) return playable
+  }
+  return null
 }
 
 /** Published link records keyed by normalised source URL (for in-place fixes). */
@@ -2435,6 +2614,19 @@ async function createDraftsFromUrl(env, rawUrl) {
         if (!single.thumbnail && rest.thumb) single.thumbnail = rest.thumb
       }
     }
+    // No usable source (or only an unrecognised player iframe)? Chase the
+    // iframe(s): VideoPress/known tubes resolve via the embed table without
+    // a fetch; anything else gets scraped itself, looking for a real file.
+    if (single && (single.sourceKind === 'page'
+      || (single.sourceKind === 'embed' && !knownEmbedFor(single.sourceUrl)))) {
+      const chased = await chaseIframePlayer(page.html, page.finalUrl || url)
+      if (chased) {
+        single.sourceUrl = chased.sourceUrl
+        single.sourceKind = chased.sourceKind || chased.kind || 'embed'
+        if (!single.thumbnail && chased.thumbnail) single.thumbnail = chased.thumbnail
+        if (!single.durationSec && chased.durationSec) single.durationSec = chased.durationSec
+      }
+    }
   }
 
   if (!parsed?.items.length) {
@@ -2762,14 +2954,21 @@ async function publishDraft(env, draft) {
     category: draft.category || DEFAULT_CATEGORY,
     tags: draft.tags?.length ? draft.tags : [draft.category || DEFAULT_CATEGORY],
     site: draft.site || '',
+    // Where the file came from — the media proxy replays it as the upstream
+    // Referer (hotlink checks look at the page site, not the CDN host).
+    pageHost: (() => {
+      try {
+        return new URL(draft.pageUrl || draft.sourceUrl).hostname
+      } catch {
+        return ''
+      }
+    })(),
     source: 'scrape',
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
   await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
-  const ids = await readIndex(env)
-  ids.unshift(id)
-  await env.VIDEOS.put('idx', JSON.stringify(ids.slice(0, MAX_INDEX)))
+  await pushIndex(env, id)
   return record
 }
 
@@ -3099,6 +3298,59 @@ async function readIndex(env) {
   } catch {
     return []
   }
+}
+
+/**
+ * KV is not transactional: a read-modify-write of `idx` racing another
+ * publish (or a hiccup between the two puts) can store a record that never
+ * lands in the index — the video exists, streams, and is invisible in the
+ * feed and the dashboard. Write, read back, retry: an orphan becomes very
+ * unlikely; reconcileIndex below heals any that still slip through.
+ */
+async function pushIndex(env, id) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const ids = await readIndex(env)
+    if (!ids.includes(id)) ids.unshift(id)
+    await env.VIDEOS.put('idx', JSON.stringify(ids.slice(0, MAX_INDEX)))
+    const check = await readIndex(env)
+    if (check.includes(id)) return
+  }
+}
+
+/**
+ * Rebuild the index from the records actually in the store (ids no longer
+ * backed by a record are dropped, stored-but-unindexed ones are added).
+ * The dashboard runs this when it opens, so merely visiting /admin/
+ * re-lists a video the bot said it posted; records intentionally deleted
+ * are never resurrected (their `v:` key is gone).
+ */
+async function reconcileIndex(env) {
+  if (typeof env.VIDEOS.list !== 'function') return 0
+  let added = 0
+  try {
+    const ids = await readIndex(env)
+    const living = []
+    for (const id of ids) {
+      if (await readVideo(env, id)) living.push(id)
+    }
+    const seen = new Set(living)
+    const listed = await env.VIDEOS.list({ prefix: 'v:', limit: 1000 })
+    for (const key of listed?.keys || []) {
+      const id = String(key?.name || '').replace(/^v:/, '')
+      if (!id || seen.has(id) || !/^[A-Za-z0-9_-]+$/.test(id)) continue
+      if (await readVideo(env, id)) {
+        living.unshift(id)
+        seen.add(id)
+        added += 1
+      }
+    }
+    if (added || living.length !== ids.length) {
+      await env.VIDEOS.put('idx', JSON.stringify(living.slice(0, MAX_INDEX)))
+    }
+  } catch {
+    /* a failed listing just means "keep the index as is" */
+  }
+  return added
 }
 
 async function readVideo(env, id) {
