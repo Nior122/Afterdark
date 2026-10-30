@@ -1998,7 +1998,7 @@ function firstKnownFrameEmbed(html, pageUrl) {
 
 /** Playable source for a scraped item: direct file, or an embeddable player. */
 function pickSourceUrl(candidates, pageUrl) {
-  for (const candidate of candidates) {
+  for (const candidate of [...candidates, ...fallbackCandidates]) {
     let url = String(candidate || '').trim()
     if (!url) continue
     // Protocol-relative values (`<iframe src="//www.player.test/embed/x">`)
@@ -2144,7 +2144,12 @@ async function wpRestRescue(pageUrl) {
   }
   const contentHay = `${post?.content?.rendered || ''}\n${post?.excerpt?.rendered || ''}\n${fields}`
   const fileUrl = firstMediaFileUrl(contentHay, post.link || pageUrl)
-  let thumb = metaContent(String(post.yoast_head || ''), 'og:image')
+  let thumb =
+    firstPosterImageUrl(contentHay, post.link || pageUrl) ||
+    post?.jetpack_featured_media_url ||
+    post?.better_featured_image?.source_url ||
+    post?.yoast_head_json?.og_image?.[0]?.url ||
+    metaContent(String(post.yoast_head || ''), 'og:image')
   if (!thumb && post.featured_media) {
     const media = await fetchJson(`${origin}/wp-json/wp/v2/media/${post.featured_media}`)
     thumb = typeof media?.source_url === 'string' ? media.source_url : ''
@@ -2167,10 +2172,35 @@ async function wpRestRescue(pageUrl) {
  * effort: any failure leaves the draft as-is.
  */
 async function decorateEmbedItem(item) {
-  if (item.sourceKind !== 'embed' || item.thumbnail) return
-  let response
+  if (item.sourceKind !== 'embed') return
+
+  // EPorner's official API exposes the exact video poster independently of
+  // player playback. Prefer it over a generic Open Graph/site image.
+  let host = ''
+  let videoId = ''
   try {
-    response = await fetch(item.sourceUrl, {
+    const parsed = new URL(item.sourceUrl)
+    host = parsed.hostname.replace(/^www\./i, '').toLowerCase()
+    videoId = parsed.pathname.match(/(?:video-|embed\/)([A-Za-z0-9]+)/i)?.[1] || ''
+  } catch {
+    /* keep the generic embed-page fallback below */
+  }
+  if (host === 'eporner.com' && videoId) {
+    const metadata = await fetchJson(
+      `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(videoId)}&thumbsize=big&format=json`,
+    )
+    const apiThumb = metadata?.default_thumb?.src ||
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '')
+    if (typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb)) {
+      item.thumbnail = apiThumb
+      if (!item.durationSec && metadata?.length_sec) item.durationSec = Number(metadata.length_sec) || 0
+      return
+    }
+  }
+
+  if (item.thumbnail) return
+  try {
+    const response = await fetch(item.sourceUrl, {
       redirect: 'follow',
       headers: {
         'User-Agent': USER_AGENT,
@@ -2273,7 +2303,8 @@ async function collectLinkRecords(env) {
 /** Fill the fields a stale record is missing from a freshly parsed item. */
 function fillRecordFromItem(record, item) {
   let changed = false
-  if (!record.thumbUrl && item.thumbnail) { record.thumbUrl = item.thumbnail; changed = true }
+  // Re-scraping duplicates also repairs old generic/site-logo posters.
+  if (item.thumbnail && record.thumbUrl !== item.thumbnail) { record.thumbUrl = item.thumbnail; changed = true }
   if (!record.description && item.description) { record.description = item.description; changed = true }
   if (!record.durationSec && item.durationSec) { record.durationSec = item.durationSec; changed = true }
   if (!record.width && item.width) { record.width = item.width; record.height = item.height || 0; changed = true }
@@ -2360,7 +2391,11 @@ function collectTags(...sources) {
 function firstPosterImageUrl(html, pageUrl) {
   const markup = String(html || '');
   const candidates = [];
-  const add = (value) => { const raw = String(value || '').trim(); if (raw) candidates.push(raw); };
+  const fallbackCandidates = [];
+  const add = (value, fallback = false) => {
+    const raw = String(value || '').trim();
+    if (raw) (fallback ? fallbackCandidates : candidates).push(raw);
+  };
   const attribute = (tag, name) => {
     const escaped = name.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
     const match = new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
@@ -2371,12 +2406,12 @@ function firstPosterImageUrl(html, pageUrl) {
     const tag = match[0];
     const key = attribute(tag, 'property') || attribute(tag, 'name') || attribute(tag, 'itemprop');
     if (/^(?:og:image(?::(?:secure_url|url))?|twitter:image(?::src)?|image|thumbnail(?:url)?)$/i.test(key)) {
-      add(attribute(tag, 'content'));
+      add(attribute(tag, 'content'), true);
     }
   }
   for (const match of markup.matchAll(/<link\b[^>]*>/gi)) {
     const tag = match[0];
-    if (/\bimage_src\b/i.test(attribute(tag, 'rel'))) add(attribute(tag, 'href'));
+    if (/\bimage_src\b/i.test(attribute(tag, 'rel'))) add(attribute(tag, 'href'), true);
   }
   for (const match of markup.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
