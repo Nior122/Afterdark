@@ -172,6 +172,30 @@ const BRAND_SHELL_PAGE = `<!doctype html><html><head><title>DarkNaija</title>
 <link rel="stylesheet" href="/wp-content/themes/naija/style.css" /></head>
 <body><div class="dlc">DOWNLOAD VIDEO</div></body></html>`
 
+// The full live darknaija shape for a bot: WordPress custom-logo anchor
+// (alt == site brand — the anchor scan used to turn THIS into the only
+// "video"), a related-posts strip, and the real file behind a cross-host
+// download link. og:title carries the brand as a " – DarkNaija" suffix.
+const DARKNAIJA_LIVE_PAGE = `<!doctype html><html><head>
+<title>Kampala Lady Josephine Record Herself Naked – DarkNaija</title>
+<meta property="og:site_name" content="DarkNaija" />
+<meta property="og:title" content="Kampala Lady Josephine Record Herself Naked – DarkNaija" />
+<link rel="stylesheet" href="/wp-content/themes/naija/style.css" /></head>
+<body>
+<a class="custom-logo-link" href="https://darknaija.test/"><img class="custom-logo" src="/logo.png" alt="DarkNaija" /></a>
+<h1>Kampala Lady Josephine Record Herself Naked</h1>
+<div class="dlc"><a href="https://cdn.darknaija.test/uploads/12/josephine.mp4">DOWNLOAD VIDEO</a></div>
+<div class="rel"><a href="/2026-07-19/mercy-from-kampala/"><img alt="ng-porn-742-img-92" src="/p1.jpg" />Mercy From Kampala</a>
+<a href="/2026-06-06/kampala-lady-dancing/"><img alt="screenshot-viva-video" src="/p2.jpg" />Kampala Lady Dancing</a></div>
+</body></html>`
+
+// Same shell, but the ONLY title anywhere in the markup is the brand.
+const DARKNAIJA_BRANDY_PAGE = `<!doctype html><html><head><title>DarkNaija</title>
+<meta property="og:site_name" content="DarkNaija" />
+<link rel="stylesheet" href="/wp-content/themes/naija/style.css" /></head>
+<body><a class="custom-logo-link" href="/"><img alt="DarkNaija" src="/logo.png" /></a>
+<div class="dlc"><a href="https://cdn.darknaija.test/uploads/9/only-slug.mp4">DOWNLOAD VIDEO</a></div></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -309,6 +333,18 @@ globalThis.fetch = async (url, opts = {}) => {
     return new Response(BRAND_SHELL_PAGE, { headers: { 'Content-Type': 'text/html' } })
   }
   if (u.startsWith('https://shellonly.test/wp-json/')) return Response.json([])
+  if (u === 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked-2/') {
+    return new Response(DARKNAIJA_LIVE_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://darknaija.test/wp-json/wp/v2/posts?slug=kampala-lady-josephine-record-herself-naked-2') {
+    return Response.json([])
+  }
+  if (u === 'https://darknaija.test/2026-01-02/slug-rescues-the-title/') {
+    return new Response(DARKNAIJA_BRANDY_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://darknaija.test/wp-json/wp/v2/posts?slug=slug-rescues-the-title') {
+    return Response.json([])
+  }
   if (u === 'https://api.github.com/repos/RBOWNER/RB/actions/workflows/deploy.yml/dispatches') {
     rebuildDispatches.push(JSON.parse(opts.body || '{}'))
     return new Response('', { status: 202 })
@@ -1470,6 +1506,41 @@ async function main() {
     const raw = await env.VIDEOS.get('idx')
     await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-brand-title')))
   }
+
+  // ---- the page, not its logo, must win (live darknaija anchor shape) ----
+  const liveBody = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked-2/' }),
+  })).json()
+  const liveDrafts = liveBody.drafts || []
+  check(
+    'logo/nav anchors never become video items',
+    !liveDrafts.some((d) => d.title === 'DarkNaija'),
+    JSON.stringify(liveDrafts.map((d) => d.title)),
+  )
+  check(
+    'the post’s own video wins over sidebar thumbnails, brand suffix cleaned',
+    liveDrafts.length === 1
+      && liveDrafts[0].title === 'Kampala Lady Josephine Record Herself Naked'
+      && liveDrafts[0].sourceUrl === 'https://cdn.darknaija.test/uploads/12/josephine.mp4'
+      && liveDrafts[0].sourceKind === 'file',
+    JSON.stringify(liveDrafts.map((d) => ({ t: d.title, s: d.sourceUrl, k: d.sourceKind }))),
+  )
+  for (const d of liveDrafts) await admin(`drafts/${d.id}`, { method: 'DELETE', headers: auth })
+  const brandyBody = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://darknaija.test/2026-01-02/slug-rescues-the-title/' }),
+  })).json()
+  check(
+    'a brand-only page with a real download link: one draft, slug title, file source',
+    brandyBody.drafts?.length === 1
+      && brandyBody.drafts[0].title === 'Slug Rescues The Title'
+      && brandyBody.drafts[0].sourceKind === 'file',
+    JSON.stringify(brandyBody.drafts),
+  )
+  for (const d of brandyBody.drafts || []) await admin(`drafts/${d.id}`, { method: 'DELETE', headers: auth })
 
   // ---- automatic sitemap rebuild: one debounced deploy per change burst ----
   rebuildDispatches.length = 0
