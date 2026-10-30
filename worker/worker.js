@@ -2144,28 +2144,63 @@ function wpSlugFromUrl(pageUrl) {
  * the raw post content (a `media_details`/`source_url` trail on the upload
  * even covers videos). Two calls max, best-effort, both optional.
  */
-/** Fetch and normalize one EPorner video record across both documented response shapes. */
+/**
+ * EPorner metadata recovery. Use the same page-HTML extraction path as
+ * DarkNaija first: EPorner's watch page exposes VideoObject.thumbnailUrl
+ * (sometimes as an array) and player poster metadata. The API remains a
+ * fallback for duration/title and for cases where the page HTML is blocked.
+ */
 async function fetchEpornerMetadata(videoId) {
   const base = 'https://www.eporner.com/api/v2/video/'
   const unwrap = (payload) => {
     if (Array.isArray(payload)) return payload[0] || null
     if (payload && typeof payload === 'object') {
-      if (Array.isArray(payload.videos)) return payload.videos[0] || null
+      if (Array.isArray(payload.videos)) return payload.videos.find((entry) => String(entry?.id || '') === String(videoId)) || payload.videos[0] || null
       if (payload.video && typeof payload.video === 'object') return payload.video
       if (payload.id || payload.default_thumb || payload.length_sec) return payload
     }
     return null
   }
+
+  let pageThumb = ''
+  let pageDuration = 0
+  const watchUrl = `https://www.eporner.com/video-${encodeURIComponent(videoId)}/`
+  try {
+    const response = await fetch(watchUrl, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        Referer: 'https://www.eporner.com/',
+      },
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(7000) : undefined,
+    })
+    if (response.ok) {
+      const html = (await response.text()).slice(0, 700000)
+      const poster = firstPosterImageUrl(html, response.url || watchUrl)
+      if (poster) {
+        try { pageThumb = new URL(decodeEntities(poster), response.url || watchUrl).toString() } catch { /* ignore malformed poster */ }
+      }
+      pageDuration = extractDurationSeconds(html) ||
+        parseDurationToSeconds(metaContent(html, 'og:video:duration')) ||
+        parseDurationToSeconds(/"(?:duration|video_duration|length)"\\s*:\\s*(\\d{1,6})/.exec(html)?.[1])
+    }
+  } catch {
+    // Continue to the API fallback if the watch page is blocked.
+  }
+
   const byId = await fetchJson(`${base}id/?id=${encodeURIComponent(videoId)}&thumbsize=big&format=json`, 4500)
   let video = unwrap(byId)
   if (!video || (!video.default_thumb?.src && !video.length_sec && !video.length_min)) {
     const search = await fetchJson(
-      `${base}search/?query=${encodeURIComponent(videoId)}&per_page=1&thumbsize=big&format=json`,
+      `${base}search/?query=${encodeURIComponent(videoId)}&per_page=10&thumbsize=big&format=json`,
       4500,
     )
     video = unwrap(search) || video
   }
-  return video
+  return video || pageThumb || pageDuration
+    ? { ...(video || {}), _pageThumb: pageThumb, _pageDurationSec: pageDuration }
+    : null
 }
 
 async function wpRestRescue(pageUrl) {
@@ -2242,12 +2277,13 @@ async function decorateEmbedItem(item) {
     // embed HTML/player: that endpoint can stall from Cloudflare Workers.
     if (item._epornerMetadataChecked) return
     const metadata = await fetchEpornerMetadata(videoId)
-    const apiThumb = metadata?.default_thumb?.src ||
+    const apiThumb = metadata?._pageThumb ||
+      metadata?.default_thumb?.src ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '') ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.src)?.src : '')
     if (typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb)) item.thumbnail = apiThumb
     if (!item.durationSec) {
-      item.durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
+      item.durationSec = metadata?._pageDurationSec || parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
     }
     if (metadata?.title && (!item.title || item.title === 'EPorner video')) item.title = cleanTitle(metadata.title)
     return
@@ -2754,7 +2790,7 @@ async function createDraftsFromUrl(env, rawUrl) {
     const apiThumb = metadata?.default_thumb?.src ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '') ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.src)?.src : '')
-    const durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
+    const durationSec = metadata?._pageDurationSec || parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
     parsed = {
       items: [{
         title: cleanTitle(metadata?.title || titleFromWatchUrl(url) || 'EPorner video'),
