@@ -1887,6 +1887,23 @@ function parseDurationToSeconds(value) {
   return 0
 }
 
+/** Read common video/player duration fields from page markup (seconds or time). */
+function extractDurationSeconds(html) {
+  const source = String(html || '')
+  const candidates = [
+    /<video\b[^>]*\bduration=["']([^"']+)["']/i.exec(source)?.[1],
+    /<video\b[^>]*\bdata-duration=["']([^"']+)["']/i.exec(source)?.[1],
+    /["'](?:duration|durationSec|duration_sec|video_duration|length_sec)["']\s*:\s*["']?([0-9]+(?::[0-9]{2}){1,2}|P[^"'\s,}]+|[0-9]+(?:\.[0-9]+)?)["']?/i.exec(source)?.[1],
+    /(?:duration|video_duration|length)\s*[:=]\s*["']([0-9]+(?::[0-9]{2}){1,2})["']/i.exec(source)?.[1],
+    metaContent(source, 'og:video:duration'),
+  ]
+  for (const candidate of candidates) {
+    const seconds = parseDurationToSeconds(candidate)
+    if (seconds > 0 && seconds < 24 * 3600) return seconds
+  }
+  return 0
+}
+
 /** Public-channel post link: t.me/<name>/<id> (query junk tolerated). */
 const TELEGRAM_POST_URL =
   /^https?:\/\/(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/[A-Za-z][A-Za-z0-9_]{4,31}\/\d+/i
@@ -2087,17 +2104,22 @@ function titleFromWatchUrl(url) {
 
 const WP_HINT = /\/wp-content\/|wp-json|generator["']\s*content=["']WordPress/i
 
-async function fetchJson(url) {
+async function fetchJson(url, timeoutMs = 10000) {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timer = setTimeout(() => controller?.abort(), timeoutMs)
   try {
     const response = await fetch(url, {
       redirect: 'follow',
       headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
-      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+      signal: controller?.signal,
     })
     if (!response.ok) return null
-    return JSON.parse((await response.text()).slice(0, 600000))
+    const body = await response.text()
+    return JSON.parse(body.slice(0, 600000))
   } catch {
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -2189,16 +2211,21 @@ async function decorateEmbedItem(item) {
     /* keep the generic embed-page fallback below */
   }
   if (host === 'eporner.com' && videoId) {
+    // EPorner is handled through its metadata API only. Never wait on the
+    // embed HTML/player: that endpoint can stall from Cloudflare Workers.
+    if (item._epornerMetadataChecked) return
     const metadata = await fetchJson(
       `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(videoId)}&thumbsize=big&format=json`,
+      5000,
     )
     const apiThumb = metadata?.default_thumb?.src ||
       (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '')
-    if (typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb)) {
-      item.thumbnail = apiThumb
-      if (!item.durationSec && metadata?.length_sec) item.durationSec = Number(metadata.length_sec) || 0
-      return
+    if (typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb)) item.thumbnail = apiThumb
+    if (!item.durationSec) {
+      item.durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
     }
+    if (metadata?.title && (!item.title || item.title === 'EPorner video')) item.title = cleanTitle(metadata.title)
+    return
   }
 
   // Even if the outer article supplied an image, inspect the actual player:
@@ -2681,10 +2708,58 @@ async function createDraftsFromUrl(env, rawUrl) {
   // Known-tube watch links carry a playable fallback derived from the URL
   // itself — the embed works even when the page refuses bot fetches outright.
   const embed = knownEmbedFor(url)
-  const page = await fetchPage(url)
+  const epornerId = (() => {
+    try {
+      const parsedUrl = new URL(url)
+      return /^eporner\.com$/i.test(parsedUrl.hostname.replace(/^www\./i, ''))
+        ? parsedUrl.pathname.match(/(?:video-|embed\/)([A-Za-z0-9]+)/i)?.[1] || ''
+        : ''
+    } catch {
+      return ''
+    }
+  })()
+
+  // EPorner watch pages were being fetched first (15s), then the embed and
+  // API were fetched serially. Start with its fast metadata API instead and
+  // build the playable embed draft immediately; no watch/embed HTML scraping.
+  let page
   let parsed = null
-  if (!page.error) {
+  if (epornerId && embed) {
+    const metadata = await fetchJson(
+      `https://www.eporner.com/api/v2/video/id/?id=${encodeURIComponent(epornerId)}&thumbsize=big&format=json`,
+      5000,
+    )
+    const apiThumb = metadata?.default_thumb?.src ||
+      (Array.isArray(metadata?.thumbs) ? metadata.thumbs.find((entry) => entry?.size === 'big' && entry?.src)?.src : '')
+    const durationSec = parseDurationToSeconds(metadata?.length_sec || metadata?.length_min || metadata?.duration)
+    parsed = {
+      items: [{
+        title: cleanTitle(metadata?.title || titleFromWatchUrl(url) || 'EPorner video'),
+        sourceUrl: embed.sourceUrl,
+        sourceKind: 'embed',
+        thumbnail: typeof apiThumb === 'string' && /^https?:\/\//i.test(apiThumb) ? apiThumb : '',
+        description: '',
+        durationSec,
+        category: inferCategory(metadata?.title || '', url),
+        tags: collectTags(metadata?.title || ''),
+        site: 'eporner.com',
+        _epornerMetadataChecked: true,
+      }],
+      site: 'eporner.com',
+      pageTitle: metadata?.title || '',
+    }
+    page = { html: '', finalUrl: url }
+  } else {
+    page = await fetchPage(url)
+  }
+  if (!parsed && !page.error) {
     parsed = scrapePage(page.html, page.finalUrl || url)
+    // Recover player duration/timestamp even when the source is a lazy-loaded
+    // WordPress player rather than an Open Graph video.
+    const pageDuration = extractDurationSeconds(page.html)
+    if (pageDuration > 0) {
+      for (const item of parsed.items) if (!item.durationSec) item.durationSec = pageDuration
+    }
     // Recover posters outside Open Graph metadata on single-video pages.
     if (parsed.items.length === 1 && !parsed.items[0].thumbnail) {
       parsed.items[0].thumbnail = firstPosterImageUrl(page.html, page.finalUrl || url)
