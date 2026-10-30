@@ -9,16 +9,26 @@
  *                            a schema.org VideoObject block. The app is bundled
  *                            inside, so the player still works.
  *   dist/admin/index.html    the owner dashboard (noindex, not linked anywhere)
- *   dist/index.html          the catalogue shell (noindex — hash routes are not
- *                            per-video URLs; videos are indexed at /v/<id>/)
+ *   dist/index.html          the catalogue shell (noindex but FOLLOWED — videos
+ *                            are indexed at /v/<id>/, and the crawler still
+ *                            flows through the home page to reach them)
  *   dist/404.html            same shell, for unknown paths on static hosts
- *   dist/sitemap.xml         every video URL + <lastmod> (the only discovery path)
- *   dist/robots.txt          allow all crawlers, point at the sitemap
+ *   dist/sitemap.xml         every video URL + <lastmod> + poster (image ext.)
+ *   dist/robots.txt          allow all crawlers, keep /admin out, point at the
+ *                            sitemap
  *
- * Because the video pages and sitemap are generated from the catalogue plus
- * the bot feed at build time, adding a video from the bot or dashboard needs a
- * rebuild before it is indexable — the dashboard has a "Rebuild site" button
- * for that.
+ * Video pages and the sitemap are generated from the catalogue plus the bot
+ * feed at build time, so a freshly published video needs a rebuild before its
+ * static page exists — the dashboard's "Rebuild site" button (and the Worker's
+ * automatic rebuild trigger, docs/google-search-console.md) covers that, and
+ * on Cloudflare Pages the middleware already serves a live, indexable page in
+ * the meantime (same head, from scripts/seo.mjs).
+ *
+ * Environment:
+ *   VITE_SITE_URL                 canonical origin (set this for a real domain)
+ *   VITE_TELEGRAM_FEED_URL        bot feed, merged into pages + sitemap
+ *   VITE_GOOGLE_SITE_VERIFICATION Google Search Console token → meta tag on
+ *                                 every page (verify whichever URL is opened)
  *
  * Run by `npm run build`; can also be run on its own after a build.
  */
@@ -26,6 +36,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadCatalogue } from './load-catalogue.mjs'
+import {
+  SITE_NAME,
+  applyHead,
+  buildHead,
+  escapeHtml,
+  feedToSeoVideo,
+  robotsTxt,
+  sitemapXml,
+} from './seo.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(root, 'dist')
@@ -42,11 +61,8 @@ if (!configuredSiteUrl) {
   )
 }
 
-const SITE_NAME = 'AfterDark'
-/** Stable fallback so repeated builds don't churn every <lastmod>. */
-const LAUNCH_DATE = '2026-01-01'
 const FEED_URL = (process.env.VITE_TELEGRAM_FEED_URL || '').replace(/\/+$/, '')
-const MAX_DESCRIPTION = 158
+const VERIFICATION = (process.env.VITE_GOOGLE_SITE_VERIFICATION || '').trim()
 
 /** Path prefix of the deployment ("/" at a domain root, "/Afterdark/" on Pages). */
 const basePath = (() => {
@@ -58,173 +74,59 @@ const basePath = (() => {
   }
 })()
 
+/** Warm up the crawler's connection to the feed origin the app calls. */
+const PRECONNECT = (() => {
+  if (!FEED_URL) return ''
+  let origin = ''
+  try {
+    origin = new URL(FEED_URL).origin
+  } catch {
+    origin = ''
+  }
+  if (!origin) return ''
+  return `<link rel="preconnect" href="${escapeHtml(origin)}" crossorigin />`
+})()
+
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{2,}$/
 
-const escapeHtml = (value) =>
-  String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+const headFor = (video) => buildHead(SITE_URL, video, { verification: VERIFICATION })
+const withHead = (shell, head) => applyHead(shell, head, { basePath, preconnect: PRECONNECT })
 
-const escapeXml = escapeHtml
-
-const absolute = (path) => {
-  if (!path) return `${SITE_URL}/thumbnails/placeholder.svg`
-  if (/^https?:\/\//i.test(path)) return path
-  return `${SITE_URL}/${String(path).replace(/^(\.\/)+/, '').replace(/^\/+/, '')}`
-}
-
-const videoUrlFor = (id) => `${SITE_URL}/v/${encodeURIComponent(id)}/`
-
-function isoDate(addedAt) {
-  const raw = String(addedAt || '').trim()
-  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00Z` : raw || LAUNCH_DATE)
-  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString()
-}
-
-function metaDescription(video) {
-  const summary = String(video.description || '')
-    .split('\n')[0]
-    .replace(/\s+/g, ' ')
-    .trim()
-  const base = summary
-    ? `Watch “${video.title}” on ${SITE_NAME}.`
-    : `Watch “${video.title}” on ${SITE_NAME}${video.category ? ` — ${video.category}` : ''}.`
-  const text = summary ? `${base} ${summary}` : base
-  return text.length > MAX_DESCRIPTION ? `${text.slice(0, MAX_DESCRIPTION - 3).trimEnd()}…` : text
-}
-
-/** Mirrors src/lib/video.ts for the two fields the JSON-LD needs. */
-function sourceOf(url) {
-  const raw = String(url || '').trim()
-  if (!raw) return { kind: 'none', src: '' }
-  try {
-    const parsed = new URL(raw)
-    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
-    if (host === 't.me' || host === 'telegram.me' || host === 'telegram.dog') return { kind: 'telegram', src: raw }
-    if (host === 'youtu.be' || host.endsWith('youtube.com')) return { kind: 'youtube', src: raw }
-    if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) return { kind: 'vimeo', src: raw }
-    if (/\.(mp4|webm|ogg|ogv|mov|m4v)(\?.*)?$/i.test(parsed.pathname)) return { kind: 'file', src: raw }
-    if (/\/(?:embed|e|player)(?:\/|$)/i.test(parsed.pathname) || host.startsWith('embed.') || host.startsWith('player.')) {
-      return { kind: 'embed', src: raw }
-    }
-    return { kind: 'page', src: raw }
-  } catch {
-    return { kind: 'none', src: '' }
-  }
-}
-
-function playerUrls(video) {
-  const source = sourceOf(video.videoUrl)
-  if (source.kind === 'file') return { contentUrl: source.src }
-  if (source.kind === 'telegram') {
-    const post = /t\.me\/(?:s\/)?([A-Za-z][A-Za-z0-9_]{3,31})\/(\d+)/.exec(source.src)
-    if (post) return { embedUrl: `https://t.me/${post[1]}/${post[2]}?embed=1&userpic=false&single=1&dark=1` }
-    return { embedUrl: source.src }
-  }
-  if (source.kind === 'embed' || source.kind === 'youtube' || source.kind === 'vimeo' || source.kind === 'page') {
-    return { embedUrl: source.src }
-  }
-  return {}
-}
-
-function isoDuration(duration) {
-  const parts = String(duration || '')
-    .split(':')
-    .map(Number)
-  if (!parts.length || parts.some((part) => !Number.isFinite(part))) return undefined
-  const [h, m, s] = parts.length === 3 ? parts : [0, parts[0] ?? 0, parts[1] ?? 0]
-  if (!h && !m && !s) return undefined
-  return `PT${h ? `${h}H` : ''}${m ? `${m}M` : ''}${s ? `${s}S` : ''}`
-}
-
-function jsonLd(video) {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'VideoObject',
-    name: video.title,
-    description: metaDescription(video),
-    thumbnailUrl: [absolute(video.thumbnail)],
-    uploadDate: isoDate(video.addedAt),
-    url: videoUrlFor(video.id),
-    ...(isoDuration(video.duration) ? { duration: isoDuration(video.duration) } : {}),
-    ...playerUrls(video),
-    isFamilyFriendly: false,
-    inLanguage: 'en',
-    publisher: { '@type': 'Organization', name: SITE_NAME },
-  }
-}
-
-function headFor(video) {
-  const title = `${video.title} — ${SITE_NAME}`
-  const description = metaDescription(video)
-  const image = absolute(video.thumbnail)
-  const url = videoUrlFor(video.id)
-  return [
-    `<title>${escapeHtml(title)}</title>`,
-    `<meta name="description" content="${escapeHtml(description)}" />`,
-    `<meta name="robots" content="index, follow, max-image-preview:large" />`,
-    `<link rel="canonical" href="${escapeHtml(url)}" />`,
-    `<meta property="og:type" content="video.other" />`,
-    `<meta property="og:site_name" content="${SITE_NAME}" />`,
-    `<meta property="og:locale" content="en_US" />`,
-    `<meta property="og:title" content="${escapeHtml(video.title)}" />`,
-    `<meta property="og:description" content="${escapeHtml(description)}" />`,
-    `<meta property="og:image" content="${escapeHtml(image)}" />`,
-    `<meta property="og:url" content="${escapeHtml(url)}" />`,
-    `<meta name="twitter:card" content="summary_large_image" />`,
-    `<meta name="twitter:title" content="${escapeHtml(video.title)}" />`,
-    `<meta name="twitter:description" content="${escapeHtml(description)}" />`,
-    `<meta name="twitter:image" content="${escapeHtml(image)}" />`,
-    `<meta name="twitter:url" content="${escapeHtml(url)}" />`,
-    `<script type="application/ld+json">${JSON.stringify(jsonLd(video)).replace(/</g, '\\u003c')}</script>`,
-  ].join('\n    ')
-}
+const NEUTRAL_HEAD = [
+  `<title>${SITE_NAME}</title>`,
+  // "follow" keeps the crawl flowing through the catalogue to the video pages;
+  // "noindex" stops the shell (no per-video content) from competing with them.
+  `<meta name="robots" content="noindex, follow" />`,
+  ...(VERIFICATION ? [`<meta name="google-site-verification" content="${escapeHtml(VERIFICATION)}" />`] : []),
+].join('\n    ')
 
 /**
- * Swap the shell's neutral metadata for a page's own, and add a <base> tag so
- * the relative ./assets URLs keep resolving from nested paths.
+ * Bot-published videos, so they get their own page and sitemap entry too.
+ * Three tries: a hiccup at build time must not silently drop every feed URL
+ * from the sitemap (Google treats vanishing URLs far worse than late ones).
  */
-function withHead(shell, head) {
-  let html = shell
-    .replace(/<meta name="robots"[^>]*>\s*/i, '')
-    .replace(/<title>[\s\S]*?<\/title>\s*/i, '')
-  if (!/<base\s/i.test(html)) {
-    html = html.replace(/<head>/i, `<head>\n    <base href="${basePath}" />`)
-  }
-  return html.replace(/<\/head>/i, `\n    ${head}\n  </head>`)
-}
-
-const NEUTRAL_HEAD = `<title>${SITE_NAME}</title>\n    <meta name="robots" content="noindex, nofollow" />`
-
-/** Bot-published videos, so they get their own page and sitemap entry too. */
 async function loadFeed() {
   if (!FEED_URL) return []
-  try {
-    const response = await fetch(`${FEED_URL}/api/videos`, { signal: AbortSignal.timeout(10000) })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = await response.json()
-    if (!Array.isArray(data?.videos)) throw new Error('unexpected feed shape')
-    return data.videos
-      .filter((video) => video?.id && (video.streamUrl || video.sourceUrl))
-      .map((video) => ({
-        id: video.id,
-        title: String(video.title || 'Video'),
-        thumbnail: video.thumbUrl || 'thumbnails/placeholder.svg',
-        duration: video.durationSec
-          ? `${Math.floor(video.durationSec / 60)}:${String(video.durationSec % 60).padStart(2, '0')}`
-          : '',
-        category: video.category || 'Homemade',
-        description: video.description || '',
-        addedAt: new Date(video.createdAt || Date.now()).toISOString().slice(0, 10),
-        videoUrl: video.streamUrl || video.sourceUrl,
-      }))
-  } catch (error) {
-    console.warn(`⚠️  Could not read the Telegram feed at build time (${error?.message || error}); continuing with the committed catalogue.`)
-    return []
+  let lastError = null
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(`${FEED_URL}/api/videos`, {
+        signal: AbortSignal.timeout(15000),
+        headers: { Accept: 'application/json', 'User-Agent': 'afterdark-build' },
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      if (!Array.isArray(data?.videos)) throw new Error('unexpected feed shape')
+      return data.videos.map(feedToSeoVideo).filter(Boolean)
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
+    }
   }
+  console.warn(
+    `⚠️  Could not read the Telegram feed at build time (${lastError?.message || lastError}); continuing with the committed catalogue.`,
+  )
+  return []
 }
 
 async function main() {
@@ -259,32 +161,18 @@ async function main() {
     'utf8',
   )
 
-  const urls = videos
-    .map(
-      (video) =>
-        `  <url>\n    <loc>${escapeXml(videoUrlFor(video.id))}</loc>\n    <lastmod>${isoDate(video.addedAt).slice(0, 10)}</lastmod>\n  </url>`,
-    )
-    .join('\n')
-  await writeFile(
-    join(dist, 'sitemap.xml'),
-    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`,
-    'utf8',
-  )
+  await writeFile(join(dist, 'sitemap.xml'), sitemapXml(SITE_URL, videos), 'utf8')
+  await writeFile(join(dist, 'robots.txt'), robotsTxt(SITE_URL), 'utf8')
 
-  await writeFile(
-    join(dist, 'robots.txt'),
-    ['User-agent: *', 'Allow: /', '', `Sitemap: ${SITE_URL}/sitemap.xml`, ''].join('\n'),
-    'utf8',
-  )
-
-  // Catalogue shell + unknown-path fallback: neutral, noindex, no video list.
+  // Catalogue shell + unknown-path fallback: neutral, noindex (but follow),
+  // no video list.
   await writeFile(join(dist, 'index.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
   await writeFile(join(dist, '404.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
 
   // A video page for an id that has no prerendered file (posted after this
-  // build). functions/_middleware.ts serves this file with a 200 instead of a
-  // 404, and the app renders the video from the live feed — so every video,
-  // old or new, opens from its own link in both modes.
+  // build). functions/_middleware.ts serves this file with a 200 — rebuilt
+  // with the video's live metadata so it is INDEXABLE immediately instead of
+  // waiting for the next build — and the app renders the video from the feed.
   await mkdir(join(dist, 'v'), { recursive: true })
   await writeFile(join(dist, 'v', '_shell.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
 

@@ -48,6 +48,28 @@ check('lastmod values are dates', lastmods.length === locs.length && lastmods.ev
 check('sitemap namespace declared', sitemap.includes('http://www.sitemaps.org/schemas/sitemap/0.9'))
 check('robots allows every crawler', /User-agent:\s*\*/.test(robots) && /Allow:\s*\/\s*$/m.test(robots))
 check('robots points at the sitemap', robots.includes(`Sitemap: ${siteUrl}/sitemap.xml`), robots)
+check('robots keeps the dashboard out of the index', robots.includes('Disallow: /admin'), robots)
+check('sitemap declares the Google image extension', sitemap.includes('xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'))
+{
+  const imageLocs = [...sitemap.matchAll(/<image:loc>([^<]+)<\/image:loc>/g)].map((match) => match[1])
+  check('every sitemap entry carries its poster', imageLocs.length === locs.length && imageLocs.every((src) => /^https?:\/\//.test(src)))
+}
+check(
+  'catalogue shell invites crawlers to follow while staying out of the index',
+  /<meta name="robots" content="noindex, follow/.test(await read('index.html')),
+)
+
+console.log('— shared SEO module (functions/_middleware.ts imports the same)')
+{
+  const { buildHead, sitemapXml, feedToSeoVideo } = await import('./seo.mjs')
+  const head = buildHead('https://x.test', { id: 'a', title: 'T', thumbnail: '', videoUrl: 'https://x.test/a.mp4' }, { verification: 'TOKEN123' })
+  check('verification meta lands when configured', head.includes('<meta name="google-site-verification" content="TOKEN123" />'))
+  check('verification meta stays out when unset', !buildHead('https://x.test', { id: 'a', title: 'T', videoUrl: '' }).includes('google-site-verification'))
+  const sm = sitemapXml('https://x.test', [{ id: 'a', title: 'T', thumbnail: 't.jpg', addedAt: '2026-01-02', updatedAt: '2026-05-05T10:00:00Z' }])
+  check('lastmod prefers the update date', sm.includes('<lastmod>2026-05-05</lastmod>'), sm)
+  check('sitemap URLs are absolute with trailing slash', sm.includes('<loc>https://x.test/v/a/</loc>'))
+  check('feed items without a source are skipped', feedToSeoVideo({ id: 'x' }) === null && feedToSeoVideo({ id: 'y', streamUrl: 's' }) !== null)
+}
 
 console.log('— root, admin and unknown paths')
 for (const name of ['index.html', '404.html', 'admin/index.html']) {
