@@ -21,7 +21,11 @@
  * allow-listed hashtags for every eligible upload. The first caption line is
  * retained as the video title; supplied description lines/hashtags are context
  * only and are replaced by the generated description/tags. Scraped links and
- * videos above the bot's 20 MB limit are never sent to the model. Without the
+ * videos above the bot's 20 MB limit are never sent to the model. Public
+ * captions are link-free on EVERY path: scraped descriptions are cleaned when
+ * the draft is created, and the feed strips stored text per response — so
+ * pages (and Google's snippets) never render a promo URL, whatever Worker
+ * version published the record. Without the
  * AI binding the upload still publishes with a deterministic fallback.
  *
  * Endpoints
@@ -248,7 +252,10 @@ async function handleFeed(env, origin) {
         height: v.height,
         createdAt: v.createdAt,
         updatedAt: v.updatedAt || null,
-        description: v.description || '',
+        // Public feed text never carries links: descriptions published by an
+        // older Worker (or edited to include one) are stripped per response —
+        // retroactive, with no republish and no rebuild.
+        description: stripCaptionLinks(v.description || ''),
         site: v.site || '',
         // 'ai' / 'owner' / 'fallback' / … — informational only; description
         // and tags above are always the values the site should render.
@@ -3228,7 +3235,11 @@ async function createDraftsFromUrl(env, rawUrl) {
       sourceUrl: item.sourceUrl,
       sourceKind: item.sourceKind,
       thumbUrl: item.thumbnail || '',
-      description: item.description || '',
+      // Same promise /start makes for uploads — "links are removed from
+      // caption text" — extended to scraped descriptions: blogs often stuff
+      // promo URLs into og:description, and they have no business on our
+      // pages (or in the text Google indexes).
+      description: stripCaptionLinks(item.description || ''),
       durationSec: item.durationSec || 0,
       width: item.width || 0,
       height: item.height || 0,
@@ -3449,7 +3460,7 @@ async function publishDraft(env, draft) {
     sourceUrl: draft.sourceUrl,
     sourceKind: draft.sourceKind || 'page',
     thumbUrl: draft.thumbUrl || '',
-    description: draft.description || '',
+    description: stripCaptionLinks(draft.description || ''),
     durationSec: draft.durationSec || 0,
     width: draft.width || 0,
     height: draft.height || 0,

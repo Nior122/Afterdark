@@ -153,6 +153,15 @@ const DEAD_REPOST_PAGE = `<!doctype html><html><head><title>Wow Look At That Ass
 <body><div class="video-wrapper"><h3>This video has been deleted</h3>
 <p>Xvideos.com embed video</p>
 <a href="https://www.xvideos.com/">Watch more porn</a></div></body></html>`
+// Blogs love stuffing promo links into og:description. The caption we publish
+// must keep the words, the poster and the source — and drop the links.
+const LINKY_CAPTION_PAGE = `<!doctype html><html><head><title>Leaked Compilation</title>
+<meta property="og:site_name" content="BlogTest" />
+<meta property="og:title" content="Leaked Compilation" />
+<meta property="og:description" content="Watch the full compilation at https://spam.test/promo — mirror at www.mirror.example.com/m. Enjoy!" />
+<meta property="og:image" content="https://blog.test/img/poster.jpg" />
+<meta property="og:video" content="https://blog.test/media/clip.mp4" />
+</head><body></body></html>`
 
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
@@ -269,6 +278,9 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://mzansi.test/dead-repost/') {
     return new Response(DEAD_REPOST_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://blog.test/linkycaption') {
+    return new Response(LINKY_CAPTION_PAGE, { headers: { 'Content-Type': 'text/html' } })
   }
   if (u === 'https://api.github.com/repos/RBOWNER/RB/actions/workflows/deploy.yml/dispatches') {
     rebuildDispatches.push(JSON.parse(opts.body || '{}'))
@@ -1315,6 +1327,68 @@ async function main() {
     deadRes.status === 422 && /deleted/i.test(deadBody.message || '') && !deadBody.drafts,
     JSON.stringify(deadBody),
   )
+
+  // ---- published captions are link-free; everything else untouched ----
+  const linkyBody = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://blog.test/linkycaption' }),
+  })).json()
+  const linkyDraft = linkyBody.drafts?.[0] || {}
+  check(
+    'a scraped caption keeps its words but loses every link',
+    /Watch the full compilation/.test(linkyDraft.description || '')
+      && !/spam\.test|www\.|mirror\.example|https?:|t\.me/.test(linkyDraft.description || ''),
+    JSON.stringify(linkyDraft.description),
+  )
+  check(
+    'link-stripping changes nothing else: same source file, poster and title',
+    linkyDraft.sourceUrl === 'https://blog.test/media/clip.mp4'
+      && linkyDraft.thumbUrl === 'https://blog.test/img/poster.jpg'
+      && linkyDraft.title === 'Leaked Compilation',
+    JSON.stringify({ s: linkyDraft.sourceUrl, t: linkyDraft.thumbUrl, n: linkyDraft.title }),
+  )
+  const linkyPub = await (await admin(`drafts/${linkyDraft.id}/publish`, { method: 'POST', headers: auth })).json()
+  const linkyRow = (await feedOf(env)).find((v) => v.id === linkyPub.video?.id)
+  check(
+    'the published record reads clean in the public feed',
+    Boolean(linkyRow) && /Enjoy!/.test(linkyRow.description)
+      && !/spam\.test|www\.|example\.com|https?:/.test(linkyRow.description),
+    JSON.stringify(linkyRow?.description),
+  )
+  // Records published BEFORE this fix read clean at serve time — no
+  // republish, no rebuild, whatever Worker version wrote them.
+  await env.VIDEOS.put('v:w-linky-old', JSON.stringify({
+    id: 'w-linky-old', kind: 'link', title: 'Old Post', category: 'POV', tags: [],
+    description: 'Hot scene, full pack at t.me/pack4u and example.shop/buy',
+    sourceUrl: 'https://blog.test/old.mp4', sourceKind: 'file', site: 'blog.test',
+    createdAt: Date.now(), updatedAt: null,
+  }))
+  await env.VIDEOS.put('idx', JSON.stringify(['w-linky-old', ...JSON.parse((await env.VIDEOS.get('idx')) || '[]')]))
+  const oldRow = (await feedOf(env)).find((v) => v.id === 'w-linky-old')
+  check(
+    'a stored record from before the fix still reads link-free on the feed',
+    Boolean(oldRow) && /full pack/.test(oldRow.description) && !/t\.me|example\.shop/.test(oldRow.description),
+    JSON.stringify(oldRow?.description),
+  )
+  const patchRes = await admin(`videos/${linkyPub.video.id}`, {
+    method: 'PATCH',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: 'Slick edit, more at x.to/p' }),
+  })
+  const patchedRow = (await feedOf(env)).find((v) => v.id === linkyPub.video.id)
+  check(
+    'owner edits persist verbatim in storage but never reach the feed with a link',
+    patchRes.status === 200
+      && Boolean(patchedRow) && /Slick edit/.test(patchedRow.description) && !/x\.to/.test(patchedRow.description),
+    JSON.stringify(patchedRow?.description),
+  )
+  await env.VIDEOS.delete(`v:${linkyPub.video.id}`)
+  await env.VIDEOS.delete('v:w-linky-old')
+  {
+    const raw = await env.VIDEOS.get('idx')
+    await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-linky-old' && x !== linkyPub.video?.id)))
+  }
 
   // ---- automatic sitemap rebuild: one debounced deploy per change burst ----
   rebuildDispatches.length = 0
