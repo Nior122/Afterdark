@@ -2174,7 +2174,7 @@ async function decorateEmbedItem(item) {
     })
     if (!response.ok) return
     const html = (await response.text()).slice(0, 400000)
-    const thumb = metaContent(html, 'og:image') || /<video\b[^>]*\bposter=["']([^"']+)["']/i.exec(html)?.[1] || ''
+    const thumb = firstPosterImageUrl(html, item.sourceUrl)
     if (thumb) {
       try {
         item.thumbnail = new URL(decodeEntities(thumb), item.sourceUrl).toString()
@@ -2239,7 +2239,10 @@ async function chaseIframePlayer(html, pageUrl) {
     if (inner.error) continue
     const innerParsed = scrapePage(inner.html, inner.finalUrl || absolute)
     const playable = innerParsed.items.find((item) => item.sourceKind && item.sourceKind !== 'page')
-    if (playable) return playable
+    if (playable) {
+      if (!playable.thumbnail) playable.thumbnail = firstPosterImageUrl(inner.html, inner.finalUrl || absolute)
+      return playable
+    }
   }
   return null
 }
@@ -2348,6 +2351,92 @@ function collectTags(...sources) {
  * Scrape one page into draft(s).
  * Returns { items: [...], site, pageTitle, error }.
  */
+function firstPosterImageUrl(html, pageUrl) {
+  const markup = String(html || '');
+  const candidates = [];
+  const add = (value) => { const raw = String(value || '').trim(); if (raw) candidates.push(raw); };
+  const attribute = (tag, name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\function scrapePage(html, pageUrl) {');
+    const match = new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
+    return match?.[1] ?? match?.[2] ?? match?.[3] ?? '';
+  };
+
+  for (const match of markup.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = match[0];
+    const key = attribute(tag, 'property') || attribute(tag, 'name') || attribute(tag, 'itemprop');
+    if (/^(?:og:image(?::(?:secure_url|url))?|twitter:image(?::src)?|image|thumbnail(?:url)?)$/i.test(key)) {
+      add(attribute(tag, 'content'));
+    }
+  }
+  for (const match of markup.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0];
+    if (/\bimage_src\b/i.test(attribute(tag, 'rel'))) add(attribute(tag, 'href'));
+  }
+  for (const match of markup.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      const walk = (node, depth = 0) => {
+        if (!node || depth > 6) return;
+        if (Array.isArray(node)) { node.forEach((item) => walk(item, depth + 1)); return; }
+        if (typeof node !== 'object') return;
+        const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+        if (types.some((value) => /videoobject/i.test(String(value || '')))) {
+          const collect = (value) => {
+            if (typeof value === 'string') add(value);
+            else if (Array.isArray(value)) value.forEach(collect);
+            else if (value && typeof value === 'object') { collect(value.url); collect(value.contentUrl); }
+          };
+          collect(node.thumbnailUrl);
+          collect(node.image);
+        }
+        Object.values(node).forEach((value) => { if (value && typeof value === 'object') walk(value, depth + 1); });
+      };
+      walk(parsed);
+    } catch { /* ignore malformed JSON-LD */ }
+  }
+  for (const match of markup.matchAll(/<video\b[^>]*>/gi)) {
+    add(attribute(match[0], 'poster'));
+    add(attribute(match[0], 'data-poster'));
+  }
+  for (const match of markup.matchAll(/<[^>]+>/g)) {
+    const tag = match[0];
+    const label = [attribute(tag, 'class'), attribute(tag, 'id')].join(' ');
+    if (/\bdata-(?:poster|thumbnail|thumb|preview|image)(?:-url)?\s*=/i.test(tag) &&
+        (!label || /video|player|poster|thumb|preview|media|cover/i.test(label))) {
+      for (const name of ['data-poster','data-poster-url','data-thumbnail','data-thumbnail-url','data-thumb','data-thumb-url','data-preview','data-image']) {
+        add(attribute(tag, name));
+      }
+    }
+  }
+  const config = markup.replace(/\\\//g, '/');
+  const configPattern = /(?:["']?(?:poster|posterUrl|poster_url|thumbnail|thumbnailUrl|thumbnail_url|thumb|thumbUrl|thumb_url|previewImage|preview_image|image)["']?)\s*[:=]\s*["']([^"']+)["']/gi;
+  for (const match of config.matchAll(configPattern)) add(match[1]);
+  for (const match of markup.matchAll(/<(?:img|source)\b[^>]*>/gi)) {
+    const tag = match[0];
+    const label = [attribute(tag,'class'),attribute(tag,'id'),attribute(tag,'alt'),attribute(tag,'title')].join(' ');
+    if (!/video|player|poster|thumb|preview|cover|media/i.test(label)) continue;
+    for (const name of ['data-poster','data-thumbnail','data-thumb','data-src','data-lazy-src','data-original','src','srcset']) {
+      const value = attribute(tag,name);
+      if (value) { add(name === 'srcset' ? value.split(',')[0].trim().split(/\s+/)[0] : value); break; }
+    }
+  }
+
+  for (const candidate of candidates) {
+    let value = decodeEntities(candidate).replace(/\\\//g, '/').trim();
+    value = value.replace(/^url\(\s*["']?(.+?)["']?\s*\)$/i, '$1').replace(/^["']|["']$/g, '');
+    if (!value || /^(?:data|blob|javascript):/i.test(value)) continue;
+    if (!/^(?:https?:)?\/\//i.test(value) && !value.startsWith('/') && !/[/?#]/.test(value) &&
+        !/\.(?:jpe?g|png|webp|gif|avif|bmp)(?:$|[?#])/i.test(value)) continue;
+    let absolute;
+    try { absolute = new URL(value, pageUrl); } catch { continue; }
+    if (absolute.protocol !== 'http:' && absolute.protocol !== 'https:') continue;
+    if (/\.(?:mp4|webm|m4v|ogv|mov|m3u8|mpd)(?:$|\?)/i.test(absolute.pathname)) continue;
+    if (/(?:^|[\/_-])(?:avatar|favicon|sprite|placeholder|logo|icon)(?:[\/_.-]|$)/i.test(absolute.pathname)) continue;
+    return absolute.toString();
+  }
+  return '';
+}
+
 function scrapePage(html, pageUrl) {
   let host = ''
   try {
@@ -2357,7 +2446,7 @@ function scrapePage(html, pageUrl) {
   }
   const site = metaContent(html, 'og:site_name') || host
   const pageTitle = cleanTitle(metaContent(html, 'og:title') || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '')
-  const pageThumb = metaContent(html, 'og:image') || metaContent(html, 'twitter:image')
+  const pageThumb = firstPosterImageUrl(html, pageUrl)
   const pageDescription =
     metaContent(html, 'og:description') || metaContent(html, 'description') || ''
   const pageKeywords = metaContent(html, 'keywords')
@@ -2551,6 +2640,10 @@ async function createDraftsFromUrl(env, rawUrl) {
   let parsed = null
   if (!page.error) {
     parsed = scrapePage(page.html, page.finalUrl || url)
+    // Recover posters outside Open Graph metadata on single-video pages.
+    if (parsed.items.length === 1 && !parsed.items[0].thumbnail) {
+      parsed.items[0].thumbnail = firstPosterImageUrl(page.html, page.finalUrl || url)
+    }
 
     // A "page" item that points at THIS page may still be playable: some
     // blogs hand the file to visitors as a plain download link, and others
