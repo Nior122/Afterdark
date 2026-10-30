@@ -136,7 +136,14 @@ Forward/send a video to the bot — it is published immediately, exactly as befo
 Paste a link (or `/add <link>`) and the bot scrapes the page:
 
 - **One video page** → title, poster, description, duration, playable
-  embed/`og:video` source and inferred category.
+  embed/`og:video` source and inferred category. When the page hides the file
+  in a JS player config, a `data-src` attribute or a plain DOWNLOAD link, it
+  is still found and used as the playable source.
+- **Tube sites that block robots** (eporner, iceporn) → a watch link like
+  `eporner.com/video-<id>/slug` is converted to the stable `/embed/` player
+  URL even when the page itself refuses the request — the draft plays, and the
+  title comes from the link slug (`viral-couple` → "Viral Couple"). Pages that
+  embed a known tube's player in an `<iframe>` get the same treatment.
 - **A gallery / category page** → every video it can find on that page
   (up to 24), each with its own title, thumbnail, link and category.
 - **Already scraped?** A source URL that is already published — or already
