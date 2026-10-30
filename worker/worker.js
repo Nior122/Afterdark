@@ -2201,7 +2201,8 @@ async function decorateEmbedItem(item) {
     }
   }
 
-  if (item.thumbnail) return
+  // Even if the outer article supplied an image, inspect the actual player:
+  // outer-page Open Graph images are often just the publisher's site logo.
   try {
     const response = await fetch(item.sourceUrl, {
       redirect: 'follow',
@@ -2216,7 +2217,7 @@ async function decorateEmbedItem(item) {
     const thumb = firstPosterImageUrl(html, item.sourceUrl)
     if (thumb) {
       try {
-        item.thumbnail = new URL(decodeEntities(thumb), item.sourceUrl).toString()
+        item.thumbnail = new URL(decodeEntities(thumb), response.url || item.sourceUrl).toString()
       } catch {
         /* leave undecorated */
       }
@@ -2751,7 +2752,7 @@ async function createDraftsFromUrl(env, rawUrl) {
           single.sourceUrl = rest.playerUrl
           single.sourceKind = 'embed'
         }
-        if (!single.thumbnail && rest.thumb) single.thumbnail = rest.thumb
+        if (rest.thumb) single.thumbnail = rest.thumb
       }
     }
     // No usable source (or only an unrecognised player iframe)? Chase the
