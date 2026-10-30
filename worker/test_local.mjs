@@ -118,6 +118,32 @@ const EPORNER_EMBED_PAGE = `<!doctype html><html><head>
 const ICEPORN_EMBED_PAGE = `<!doctype html><html><head>
 <meta property="og:image" content="https://thumb.iceppsn.test/media/deco.jpg" /></head><body></body></html>`
 
+// A page whose og:video file lives on a CDN that hotlink-checks visitors:
+// the feed must route playback (and the poster) through the Worker proxy.
+const PROXY_FILE_PAGE = `<!doctype html><html><head><title>Big Baddie Leak</title>
+<meta property="og:site_name" content="NaijaLeaks" />
+<meta property="og:video" content="https://cdn.proxy.test/uploads/big-baddie.mp4" />
+<meta property="og:image" content="https://cdn.proxy.test/uploads/big-baddie.jpg" />
+</head><body></body></html>`
+
+// A mzansiadultblog-style repost: the video lives on VideoPress (WordPress.com)
+// behind an iframe — the known-embed table must map it to /embed/.
+const VP_PAGE = `<!doctype html><html><head><title>Wow Look At That Ass</title>
+<link rel="stylesheet" href="/wp-content/themes/bosa/style.css" /></head>
+<body><iframe src="https://videopress.com/v/9xKq2mPz" width="640" height="360" frameborder="0" allowfullscreen></iframe></body></html>`
+
+// A post whose player iframe points at an unknown player PAGE that itself
+// carries the file as og:video — the generic iframe chase must follow it.
+const CHASE_PAGE = `<!doctype html><html><head><title>Chased Clip</title></head>
+<body><iframe src="https://player.chasetest.test/watch/777" frameborder="0"></iframe></body></html>`
+const CHASE_TARGET = `<!doctype html><html><head><title>Chased Clip — Player</title>
+<meta property="og:video" content="https://cdn.chasetest.test/v/777.mp4" />
+<meta property="og:image" content="https://cdn.chasetest.test/v/777.jpg" />
+<meta property="og:video:duration" content="95" /></head><body></body></html>`
+
+/** Headers the media proxy sent upstream, for Referer/Range assertions. */
+const proxiedUpstream = []
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -237,6 +263,39 @@ globalThis.fetch = async (url, opts = {}) => {
       yoast_head: '<meta property="og:image" content="https://naija.test/uploads/7/poster.jpg" />',
     }])
   }
+  // External file+poster with header capture for proxy assertions.
+  if (u === 'https://proxy.test/big-baddie/') return new Response(PROXY_FILE_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  if (u === 'https://cdn.proxy.test/uploads/big-baddie.mp4') {
+    proxiedUpstream.push({
+      kind: 'video',
+      range: String(opts.headers?.Range ?? opts.headers?.range ?? ''),
+      referer: String(opts.headers?.Referer ?? opts.headers?.referer ?? ''),
+      ua: String(opts.headers?.['User-Agent'] ?? opts.headers?.['user-agent'] ?? ''),
+    })
+    const range = opts.headers?.Range ?? opts.headers?.range
+    if (typeof range === 'string' && /^bytes=(\d+)-(\d*)$/.test(range)) {
+      const m = range.match(/^bytes=(\d+)-(\d*)$/)
+      const start = Number(m[1])
+      const end = m[2] === '' ? MP4.length - 1 : Math.min(Number(m[2]), MP4.length - 1)
+      return new Response(MP4.slice(start, end + 1), {
+        status: 206,
+        headers: {
+          'Content-Type': 'video/mp4',
+          'Content-Length': String(end - start + 1),
+          'Content-Range': `bytes ${start}-${end}/${MP4.length}`,
+        },
+      })
+    }
+    return new Response(MP4, { headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(MP4.length) } })
+  }
+  if (u === 'https://cdn.proxy.test/uploads/big-baddie.jpg') {
+    proxiedUpstream.push({ kind: 'thumb', referer: String(opts.headers?.Referer ?? opts.headers?.referer ?? '') })
+    return new Response(JPG, { headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(JPG.length) } })
+  }
+  if (u === 'https://vp.test/wow-look-at-that-ass/') return new Response(VP_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  if (u === 'https://chasetest.test/chased-clip/') return new Response(CHASE_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  if (u === 'https://player.chasetest.test/watch/777') return new Response(CHASE_TARGET, { headers: { 'Content-Type': 'text/html' } })
+  if (u === 'https://cdn.chasetest.test/v/777.mp4') return new Response(MP4, { headers: { 'Content-Type': 'video/mp4' } })
   if (u.startsWith('https://www.eporner.com/embed/')) {
     return new Response(EPORNER_EMBED_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
@@ -251,6 +310,12 @@ class MockKV {
   async get(k) { return this.map.has(k) ? this.map.get(k) : null }
   async put(k, v) { this.map.set(k, String(v)) }
   async delete(k) { this.map.delete(k) }
+  async list({ prefix = '', limit = 1000 } = {}) {
+    return {
+      keys: [...this.map.keys()].filter((k) => k.startsWith(prefix)).slice(0, limit).map((name) => ({ name })),
+      list_complete: true,
+    }
+  }
 }
 
 function makeCtx() {
@@ -1020,9 +1085,13 @@ async function main() {
     JSON.stringify(afterRepair.sourceUrl),
   )
   check(
-    'repaired record gained the poster',
-    afterRepair.thumbUrl === 'https://naija.test/uploads/7/poster.jpg',
+    'repaired record gained the poster (served via the thumb proxy)',
+    afterRepair.thumbUrl === `https://worker.test/api/videos/${stalePage.id}/thumb.jpg`,
     JSON.stringify(afterRepair.thumbUrl),
+  )
+  check(
+    'the stored record keeps the true upstream poster',
+    JSON.parse(await env.VIDEOS.get(`v:${stalePage.id}`)).thumbUrl === 'https://naija.test/uploads/7/poster.jpg',
   )
 
   // And the eporner complaint: an embed record published without a poster
@@ -1049,11 +1118,137 @@ async function main() {
   )
   const afterBackfill = (await feedOf(env)).find((v) => v.id === staleEmbed.id) || {}
   check(
-    'backfilled record shows the tube poster and duration',
-    afterBackfill.thumbUrl === 'https://static-ca-cdn.eporner.com/thumbs/deco.jpg'
+    'backfilled record shows the tube poster (proxied) and duration',
+    afterBackfill.thumbUrl === `https://worker.test/api/videos/${staleEmbed.id}/thumb.jpg`
       && afterBackfill.durationSec === 1008,
     JSON.stringify({ t: afterBackfill.thumbUrl, d: afterBackfill.durationSec }),
   )
+  check(
+    'the backfilled record keeps the upstream poster URL in storage',
+    JSON.parse(await env.VIDEOS.get(`v:${staleEmbed.id}`)).thumbUrl === 'https://static-ca-cdn.eporner.com/thumbs/deco.jpg',
+  )
+
+  // ---- playback proxy for scraped external files (hotlink-blocked CDNs) ----
+  const proxyScrape = await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://proxy.test/big-baddie/' }),
+  })
+  const proxyDraft = await proxyScrape.json()
+  check(
+    'proxy fixture scraped as a file',
+    proxyDraft.drafts?.[0]?.sourceKind === 'file',
+    JSON.stringify(proxyDraft.drafts?.[0]?.sourceKind),
+  )
+  const proxyPublish = await admin(`drafts/${proxyDraft.drafts[0].id}/publish`, { method: 'POST', headers: auth })
+  const proxyPublished = await proxyPublish.json()
+  check('proxy fixture published', proxyPublish.status === 200 && Boolean(proxyPublished.video?.id), JSON.stringify(proxyPublished))
+  const proxyVideo = (await (await admin('videos', { headers: auth })).json())
+    .videos.find((v) => v.id === proxyPublished.video.id)
+  check(
+    'published scrape streams through the Worker proxy',
+    proxyVideo.streamUrl === `https://worker.test/api/videos/${proxyVideo.id}/stream.mp4`,
+    JSON.stringify(proxyVideo.streamUrl),
+  )
+  check(
+    'true source URL stays on the record (private)',
+    proxyVideo.sourceUrl === 'https://cdn.proxy.test/uploads/big-baddie.mp4',
+    JSON.stringify(proxyVideo.sourceUrl),
+  )
+  check(
+    'scraped poster is proxied too',
+    proxyVideo.thumbUrl === `https://worker.test/api/videos/${proxyVideo.id}/thumb.jpg`,
+    JSON.stringify(proxyVideo.thumbUrl),
+  )
+  const feedProxyRow = (await feedOf(env)).find((v) => v.id === proxyVideo.id)
+  check(
+    'public feed exposes the proxied stream for scrapes',
+    feedProxyRow?.streamUrl?.endsWith(`/api/videos/${proxyVideo.id}/stream.mp4`),
+    JSON.stringify(feedProxyRow?.streamUrl),
+  )
+  proxiedUpstream.length = 0
+  const proxyStream = await call(env, `https://worker.test/api/videos/${proxyVideo.id}/stream.mp4`)
+  const streamBytes = new Uint8Array(await proxyStream.arrayBuffer())
+  check(
+    'proxied stream returns the file bytes',
+    proxyStream.status === 200 && streamBytes.length === MP4.length && proxyStream.headers.get('Content-Type') === 'video/mp4',
+    JSON.stringify({ s: proxyStream.status, n: streamBytes.length }),
+  )
+  const proxyThumb = await call(env, `https://worker.test/api/videos/${proxyVideo.id}/thumb.jpg`)
+  check('proxied poster returns the image bytes', proxyThumb.status === 200 && (await proxyThumb.arrayBuffer()).byteLength === JPG.length)
+  check(
+    'upstream saw browser UA + source-site Referer',
+    proxiedUpstream.length === 2
+      && proxiedUpstream.every((h) => h.referer === 'https://proxy.test/')
+      && /Mozilla/.test(proxiedUpstream.find((h) => h.kind === 'video')?.ua || ''),
+    JSON.stringify(proxiedUpstream),
+  )
+  const proxyRange = await call(env, `https://worker.test/api/videos/${proxyVideo.id}/stream.mp4`, {
+    headers: { range: 'bytes=0-3' },
+  })
+  check(
+    'Range requests pass through to the upstream',
+    proxyRange.status === 206
+      && proxyRange.headers.get('Content-Range') === `bytes 0-3/${MP4.length}`
+      && proxiedUpstream.some((h) => h.range === 'bytes=0-3'),
+    JSON.stringify({ s: proxyRange.status, cr: proxyRange.headers.get('Content-Range') }),
+  )
+  const embedStream = await call(env, 'https://worker.test/api/videos/w-stale-eporner/stream.mp4')
+  check('embed records refuse the stream proxy', embedStream.status === 404)
+  await env.VIDEOS.put(
+    'v:w-ssrf-test',
+    JSON.stringify({ id: 'w-ssrf-test', kind: 'link', sourceKind: 'file', sourceUrl: 'https://worker.test/evil.mp4', title: 'SSRF probe', category: 'POV', tags: [], durationSec: 0, createdAt: Date.now(), updatedAt: null }),
+  )
+  const ssrfRes = await call(env, 'https://worker.test/api/videos/w-ssrf-test/stream.mp4')
+  check('proxy refuses its own origin', ssrfRes.status === 404)
+  await env.VIDEOS.delete('v:w-ssrf-test')
+
+  // ---- VideoPress (mzansiadultblog-style reposts) ----
+  const vpScrape = await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://vp.test/wow-look-at-that-ass/' }),
+  })
+  const vpDraft = await vpScrape.json()
+  check(
+    'VideoPress iframe maps to a direct embed URL',
+    vpDraft.drafts?.[0]?.sourceKind === 'embed' && vpDraft.drafts?.[0]?.sourceUrl === 'https://videopress.com/embed/9xKq2mPz',
+    JSON.stringify({ k: vpDraft.drafts?.[0]?.sourceKind, s: vpDraft.drafts?.[0]?.sourceUrl }),
+  )
+  await admin(`drafts/${vpDraft.drafts[0].id}`, { method: 'DELETE', headers: auth })
+
+  // ---- generic player-iframe chase ----
+  const chaseScrape = await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://chasetest.test/chased-clip/' }),
+  })
+  const chaseDraft = await chaseScrape.json()
+  check(
+    'unknown player iframe is chased to its file',
+    chaseDraft.drafts?.[0]?.sourceKind === 'file' && chaseDraft.drafts?.[0]?.sourceUrl === 'https://cdn.chasetest.test/v/777.mp4',
+    JSON.stringify({ k: chaseDraft.drafts?.[0]?.sourceKind, s: chaseDraft.drafts?.[0]?.sourceUrl }),
+  )
+  check(
+    'chase inherits the inner page duration',
+    chaseDraft.drafts?.[0]?.durationSec === 95,
+    JSON.stringify(chaseDraft.drafts?.[0]?.durationSec),
+  )
+  await admin(`drafts/${chaseDraft.drafts[0].id}`, { method: 'DELETE', headers: auth })
+
+  // ---- self-heal: stored but never indexed ("posted, went nowhere") ----
+  await env.VIDEOS.put(
+    'v:w-orphaned',
+    JSON.stringify({ id: 'w-orphaned', kind: 'link', sourceKind: 'embed', sourceUrl: 'https://videopress.com/embed/orphan1', title: 'Orphaned Clip', category: 'POV', tags: [], durationSec: 0, createdAt: Date.now(), updatedAt: null }),
+  )
+  const orphanVideos = await (await admin('videos', { headers: auth })).json()
+  check("dashboard load re-indexes an orphaned record", orphanVideos.videos.some((v) => v.id === 'w-orphaned'))
+  check('re-indexed record appears in the public feed too', (await feedOf(env)).some((v) => v.id === 'w-orphaned'))
+  await env.VIDEOS.delete('v:w-orphaned')
+  {
+    const raw = await env.VIDEOS.get('idx')
+    await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-orphaned')))
+  }
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
