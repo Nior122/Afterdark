@@ -275,7 +275,7 @@ public/
   favicon.svg
 src/
   components/    Header, Sidebar, CategoryBar, VideoCard/Grid/Row, CreateModal, AgeGate, ThemeToggle, KebabMenu…
-  data/seed.ts   POV Central (attribution metadata only), the 10-video catalogue, adult categories (ad arrays are empty)
+  data/seed.ts   POV Central (attribution metadata only), the 13-video catalogue, adult categories (ad arrays are empty)
   lib/store.tsx  React context store persisted to localStorage
   lib/theme.tsx  light/dark theme provider (localStorage + prefers-color-scheme)
   lib/age.ts     18+ acceptance flag and hook
@@ -317,8 +317,8 @@ is dark and `<div id="root">` is empty. Check, in this order:
 
 - The UI is fully responsive: 4-column feed at ≥1168 px, 3/2/1 columns below, off-canvas sidebar on
   mobile, and the watch page switches to a side rail at ≥1184 px.
-- There are no ad or demo videos: the seeded catalogue contains only the 10 curated link-only
-  videos in `SEED_VIDEOS` — 3 POV embeds, 3 Homemade embeds, 1 Homemade Telegram post and 3 Mzansi listings
+- There are no ad or demo videos: the seeded catalogue contains only the 13 curated link-only
+  videos in `SEED_VIDEOS` — 3 POV embeds, 3 Homemade embeds, 1 Homemade Telegram post, 3 Mzansi listings and 3 DarkNaija listings
   (`RECOMMENDED_ADS`/`TRENDING_ADS` are empty arrays).
 - Inter is bundled locally via `@fontsource-variable/inter`, so no external font request is needed.
 - **Theming.** Light and dark are both supported. Components never carry `dark:` variants or raw hex:
