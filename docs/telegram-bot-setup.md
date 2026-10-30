@@ -143,7 +143,19 @@ Paste a link (or `/add <link>`) and the bot scrapes the page:
   `eporner.com/video-<id>/slug` is converted to the stable `/embed/` player
   URL even when the page itself refuses the request — the draft plays, and the
   title comes from the link slug (`viral-couple` → "Viral Couple"). Pages that
-  embed a known tube's player in an `<iframe>` get the same treatment.
+  embed a known tube's player in an `<iframe>` (including
+  `…/embed/redirect?target_url=…` wrappers) get the same treatment. The embed
+  page is then read once to pull the tube's real **poster** and **duration**
+  into the draft — best effort, playback never depends on it.
+- **Obfuscated WordPress blogs** (darknaija-style download buttons, mzansi-style page builders) → when the served
+  HTML hides the file behind escaped/encoded markup, the Worker also asks the
+  site's public WordPress REST API (`/wp-json/wp/v2/posts?slug=…`) — that
+  usually carries the raw post content with the `.mp4` and the real poster.
+- **Re-paste = repair** → if an old listing for that exact page was published
+  before these rescues existed (it only pointed at the page and never
+  played), re-sending the link **fixes the existing record in place** — source,
+  poster and duration — instead of answering "already on the site". Same for a
+  record that merely lacks a poster. Nothing gets duplicated.
 - **A gallery / category page** → every video it can find on that page
   (up to 24), each with its own title, thumbnail, link and category.
 - **Already scraped?** A source URL that is already published — or already

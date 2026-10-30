@@ -91,6 +91,33 @@ const FRAME_PAGE = `<!doctype html><html><head><title>Tiny Amateur GF Made A Sex
 const BAR_EPORNER_PAGE = `<!doctype html><html><head><title>Some Other Clip</title></head>
 <body><div class="nojs-player">loading…</div></body></html>`
 
+// Page-builder obfuscation (darknaija et al): the file only ever appears in
+// the HTML with JSON-escaped slashes, so a naive scan sees `https:\/\/…`.
+const ESCAPED_CFG_PAGE = `<!doctype html><html><head><title>Escaped Config Clip</title></head>
+<body><div class="vpd-player" data-config='{"player":{"file":"https:\\/\\/cdn.test\\/wp\\/uploads\\/clip.mp4"}}'></div>
+<script>fluidPlayer("vpd", { media: { sources: [{ file: "https:\\/\\/cdn.test\\/wp\\/uploads\\/clip.mp4" }] } });</script></body></html>`
+
+// The player is an iframe wrapped in a redirect whose target_url only becomes
+// a usable tube URL after percent-decoding.
+const FRAME_REDIRECT_PAGE = `<!doctype html><html><head><title>Redirect Frame Clip</title></head>
+<body><iframe src="//www.iceporn.com/embed/redirect?type=main&target_url=https%3A%2F%2Fwww.iceporn.com%2Fvideo%2F555111%2Fclip" frameborder="0"></iframe></body></html>`
+
+// A WordPress page whose served HTML hides the file entirely (only a wp-
+// content hint and the naked anchor text survive) — the REST API rescue is
+// the only way to it. Poster comes from the yoast meta inside the REST entry.
+const NAIFICA_PAGE = `<!doctype html><html><head><title>Baddie Street Clip</title>
+<link rel="stylesheet" href="/wp-content/themes/naija/style.css" /></head>
+<body><h1>Baddie Street Clip</h1><div class="dlc">DOWNLOAD VIDEO</div></body></html>`
+
+// Tube embed pages — served to third-party iframes, so the Worker can read
+// them even when the watch page blocks it. This is what poster/duration
+// decoration pulls from.
+const EPORNER_EMBED_PAGE = `<!doctype html><html><head>
+<meta property="og:image" content="https://static-ca-cdn.eporner.com/thumbs/deco.jpg" />
+<meta property="og:video:duration" content="1008" /></head><body><div class="player"></div></body></html>`
+const ICEPORN_EMBED_PAGE = `<!doctype html><html><head>
+<meta property="og:image" content="https://thumb.iceppsn.test/media/deco.jpg" /></head><body></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -189,6 +216,32 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u === 'https://www.eporner.com/video-ABC123xyz/some-other-clip/') {
     return new Response(BAR_EPORNER_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://blog.test/escaped-cfg') {
+    return new Response(ESCAPED_CFG_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://blog.test/frame-redirect') {
+    return new Response(FRAME_REDIRECT_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://naija.test/2026-10-30/json-hidden/') {
+    return new Response(NAIFICA_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u === 'https://naija.test/wp-json/wp/v2/posts?slug=json-hidden') {
+    return Response.json([{
+      id: 7,
+      link: 'https://naija.test/2026-10-30/json-hidden/',
+      title: { rendered: 'Baddie Street Clip' },
+      content: { rendered: '<figure><video controls src="https://cdn.naija.test/uploads/7/baddie.mp4"></video></figure>' },
+      excerpt: { rendered: '' },
+      featured_media: 0,
+      yoast_head: '<meta property="og:image" content="https://naija.test/uploads/7/poster.jpg" />',
+    }])
+  }
+  if (u.startsWith('https://www.eporner.com/embed/')) {
+    return new Response(EPORNER_EMBED_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+  if (u.startsWith('https://www.iceporn.com/embed/')) {
+    return new Response(ICEPORN_EMBED_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
   return realFetch(url, opts)
 }
@@ -633,6 +686,58 @@ async function main() {
       && framedBody.drafts?.[0]?.sourceKind === 'embed',
     JSON.stringify(framedBody).slice(0, 180),
   )
+  check(
+    'tube embed draft picks up its real poster',
+    framedBody.drafts?.[0]?.thumbUrl === 'https://thumb.iceppsn.test/media/deco.jpg',
+    JSON.stringify(framedBody.drafts?.[0]?.thumbUrl),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const escaped = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://blog.test/escaped-cfg' }),
+  })
+  const escapedBody = await escaped.json()
+  check(
+    'JSON-escaped file URLs are found after unescaping',
+    escapedBody.drafts?.[0]?.sourceUrl === 'https://cdn.test/wp/uploads/clip.mp4'
+      && escapedBody.drafts?.[0]?.sourceKind === 'file',
+    JSON.stringify(escapedBody).slice(0, 180),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const redirected = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://blog.test/frame-redirect' }),
+  })
+  const redirectedBody = await redirected.json()
+  check(
+    'percent-encoded iframe redirect resolves to the tube embed',
+    redirectedBody.drafts?.[0]?.sourceUrl === 'https://www.iceporn.com/embed/555111'
+      && redirectedBody.drafts?.[0]?.sourceKind === 'embed',
+    JSON.stringify(redirectedBody).slice(0, 180),
+  )
+  await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
+
+  const viaRest = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://naija.test/2026-10-30/json-hidden/' }),
+  })
+  const viaRestBody = await viaRest.json()
+  check(
+    'WordPress REST rescue finds a file the page HTML hid',
+    viaRestBody.drafts?.[0]?.sourceUrl === 'https://cdn.naija.test/uploads/7/baddie.mp4'
+      && viaRestBody.drafts?.[0]?.sourceKind === 'file',
+    JSON.stringify(viaRestBody).slice(0, 200),
+  )
+  check(
+    'REST poster (yoast og:image) fills the draft thumbnail',
+    viaRestBody.drafts?.[0]?.thumbUrl === 'https://naija.test/uploads/7/poster.jpg',
+    JSON.stringify(viaRestBody.drafts?.[0]?.thumbUrl),
+  )
   await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
 
   const tubeBlocked = await admin('scrape', {
@@ -649,6 +754,12 @@ async function main() {
     JSON.stringify(tubeBlockedBody).slice(0, 180),
   )
   check('embed-only draft gets its title from the link slug', tubeBlockedBody.drafts?.[0]?.title === 'Viral Couple', JSON.stringify(tubeBlockedBody.drafts?.[0]?.title))
+  check(
+    'blocked tube draft decorates poster + duration from the embed page',
+    tubeBlockedBody.drafts?.[0]?.thumbUrl === 'https://static-ca-cdn.eporner.com/thumbs/deco.jpg'
+      && tubeBlockedBody.drafts?.[0]?.durationSec === 1008,
+    JSON.stringify(tubeBlockedBody.drafts?.[0]).slice(0, 220),
+  )
   await admin('drafts/discard-all', { method: 'POST', headers: auth, body: '{}' })
 
   const tubeScraped = await admin('scrape', {
@@ -877,6 +988,72 @@ async function main() {
   const rebuild = await admin('rebuild', { method: 'POST', headers: auth, body: '{}' })
   check('rebuild explains it is not configured', rebuild.status === 503)
   check('CORS preflight allowed', (await call(adminEnv, 'https://worker.test/api/admin/settings', { method: 'OPTIONS' })).status === 204)
+
+  console.log('— in-place repair of stale listings (re-pasting a broken link fixes it)')
+  // Seed a pre-salvage record: published pointing at the page itself, no
+  // poster. Re-scraping the SAME page must repair it in place — never a
+  // "already on the site" dead end, never a duplicate.
+  const stalePage = {
+    id: 'w-stale-naija', kind: 'link', sourceKind: 'page',
+    sourceUrl: 'https://naija.test/2026-10-30/json-hidden/',
+    title: 'Old Broken Entry', category: 'Homemade', tags: [], durationSec: 0,
+    thumbUrl: '', description: '', site: 'naija.test', createdAt: Date.now() - 10000,
+  }
+  await env.VIDEOS.put(`v:${stalePage.id}`, JSON.stringify(stalePage))
+  await env.VIDEOS.put('idx', JSON.stringify([stalePage.id, ...JSON.parse((await env.VIDEOS.get('idx')) || '[]')]))
+
+  const repairScrape = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://naija.test/2026-10-30/json-hidden/' }),
+  })
+  const repairBody = await repairScrape.json()
+  check(
+    'stale page-only record is repaired, not called a duplicate',
+    repairBody.repaired === 1 && repairBody.drafts.length === 0,
+    JSON.stringify(repairBody).slice(0, 200),
+  )
+  const afterRepair = (await feedOf(env)).find((v) => v.id === stalePage.id) || {}
+  check(
+    'repaired record now plays the REST-found file',
+    (afterRepair.sourceUrl || '').endsWith('/uploads/7/baddie.mp4'),
+    JSON.stringify(afterRepair.sourceUrl),
+  )
+  check(
+    'repaired record gained the poster',
+    afterRepair.thumbUrl === 'https://naija.test/uploads/7/poster.jpg',
+    JSON.stringify(afterRepair.thumbUrl),
+  )
+
+  // And the eporner complaint: an embed record published without a poster
+  // gets poster + duration backfilled when the same watch link is re-pasted.
+  const staleEmbed = {
+    id: 'w-stale-eporner', kind: 'link', sourceKind: 'embed',
+    sourceUrl: 'https://www.eporner.com/embed/CqzTB8dIhZD/',
+    title: 'Viral Couple', category: 'Homemade', tags: [], durationSec: 0,
+    thumbUrl: '', description: '', site: 'eporner.com', createdAt: Date.now() - 10000,
+  }
+  await env.VIDEOS.put(`v:${staleEmbed.id}`, JSON.stringify(staleEmbed))
+  await env.VIDEOS.put('idx', JSON.stringify([staleEmbed.id, ...JSON.parse((await env.VIDEOS.get('idx')) || '[]')]))
+
+  const backfillScrape = await admin('scrape', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ url: 'https://www.eporner.com/video-CqzTB8dIhZD/viral-couple/' }),
+  })
+  const backfillBody = await backfillScrape.json()
+  check(
+    're-pasting a tube link backfills the missing poster',
+    backfillBody.backfilled === 1 && backfillBody.drafts.length === 0,
+    JSON.stringify(backfillBody).slice(0, 200),
+  )
+  const afterBackfill = (await feedOf(env)).find((v) => v.id === staleEmbed.id) || {}
+  check(
+    'backfilled record shows the tube poster and duration',
+    afterBackfill.thumbUrl === 'https://static-ca-cdn.eporner.com/thumbs/deco.jpg'
+      && afterBackfill.durationSec === 1008,
+    JSON.stringify({ t: afterBackfill.thumbUrl, d: afterBackfill.durationSec }),
+  )
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
