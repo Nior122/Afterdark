@@ -138,6 +138,27 @@ const verticalFeedVideo_ = {
   thumbUrl: 'https://worker.test/api/videos/tg-vertical/thumb.jpg',
 }
 
+/**
+ * A small day of clips for the rotation scenario: eight feed records so the
+ * home grid must render every one of them exactly once, whatever order the
+ * two-minute reshuffle picked.
+ */
+const rotationFeed_ = Array.from({ length: 8 }, (_, i) => ({
+  id: `tg-rot-${i}`,
+  title: `Rotation Clip ${i}`,
+  category: 'Homemade',
+  tags: ['Homemade'],
+  durationSec: 60 + i,
+  createdAt: Date.parse('2026-10-01T00:00:00Z') + i * 3_600_000,
+  updatedAt: null,
+  description: '',
+  site: 't.me',
+  views: 0,
+  sourceUrl: `https://t.me/rotchan/${100 + i}`,
+  streamUrl: null,
+  thumbUrl: `https://worker.test/api/videos/tg-rot-${i}/thumb.jpg`,
+}))
+
 const scenarios = [
   {
     name: 'first visit (no localStorage) shows the age gate',
@@ -151,6 +172,27 @@ const scenarios = [
     fetch: okWorker('public'),
     accepted: true,
     expect: (text) => /Latest videos|Popular categories/i.test(text),
+  },
+  {
+    name: 'rotation: the built app reshuffles without dropping or duplicating cards',
+    path: '/',
+    accepted: true,
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: rotationFeed_ }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    expect: (text) => rotationFeed_.every((video) => text.includes(video.title)),
+    probes: (window) => {
+      // Cover + title links of one card are adjacent duplicates — collapse them.
+      const hrefs = [...window.document.querySelectorAll('section a[href*="/watch/"]')].map((a) => a.getAttribute('href'))
+      const cards = hrefs.filter((href, i) => href !== hrefs[i - 1])
+      return [['every video keeps exactly one card through the rotation', cards.length >= 8 && new Set(cards).size === cards.length]]
+    },
   },
   {
     name: 'direct mode hides the catalogue',

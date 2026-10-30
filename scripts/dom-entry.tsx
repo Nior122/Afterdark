@@ -5,6 +5,7 @@
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 import Root from '../src/Root'
+import { msUntilNextBucket, reshuffleBucket, seededShuffle } from '../src/lib/reshuffle'
 import { SettingsProvider } from '../src/lib/settings'
 import { StoreProvider } from '../src/lib/store'
 import { ThemeProvider } from '../src/lib/theme'
@@ -24,3 +25,7 @@ export function mount(container: HTMLElement) {
   })
   return root
 }
+
+// Used directly by scripts/verify-dom.cjs — checks exercise the same code the
+// store imports, so the harness can never drift from shipped behaviour.
+export { msUntilNextBucket, reshuffleBucket, seededShuffle }
