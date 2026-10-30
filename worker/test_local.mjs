@@ -163,6 +163,15 @@ const LINKY_CAPTION_PAGE = `<!doctype html><html><head><title>Leaked Compilation
 <meta property="og:video" content="https://blog.test/media/clip.mp4" />
 </head><body></body></html>`
 
+// What darknaija really serves a bot: an obfuscated shell whose only title is
+// the site brand. The real headline lives in the permalink slug, and — when
+// reachable — in the WP REST entry (with the file and the poster).
+const BRAND_SHELL_PAGE = `<!doctype html><html><head><title>DarkNaija</title>
+<meta property="og:site_name" content="DarkNaija" />
+<meta property="og:title" content="DarkNaija" />
+<link rel="stylesheet" href="/wp-content/themes/naija/style.css" /></head>
+<body><div class="dlc">DOWNLOAD VIDEO</div></body></html>`
+
 const GALLERY_PAGE = `<!doctype html><html><head><title>Latest videos — SomeTube</title>
 <meta property="og:site_name" content="SomeTube" /></head><body>
 <a href="/video/111/first-clip" title="First Clip Title"><img src="/t/1.jpg" alt="First Clip Title" /></a>
@@ -282,6 +291,24 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u === 'https://blog.test/linkycaption') {
     return new Response(LINKY_CAPTION_PAGE, { headers: { 'Content-Type': 'text/html' } })
   }
+  if (u === 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked/') {
+    return new Response(BRAND_SHELL_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u === 'https://darknaija.test/wp-json/wp/v2/posts?slug=kampala-lady-josephine-record-herself-naked') {
+    return Response.json([{
+      id: 12,
+      link: 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked/',
+      title: { rendered: 'Kampala Lady Josephine Record Herself Naked' },
+      content: { rendered: '<figure><video controls src="https://cdn.darknaija.test/uploads/12/josephine.mp4"></video></figure>' },
+      excerpt: { rendered: '' },
+      yoast_head: '<meta property="og:image" content="https://darknaija.test/uploads/12/josephine.jpg" />',
+    }])
+  }
+  // Same shell, but the REST API is empty too — only the slug can save it.
+  if (u === 'https://shellonly.test/2026-10-29/kampala-lady-josephine-record-herself-naked/') {
+    return new Response(BRAND_SHELL_PAGE, { headers: { 'Content-Type': 'text/html' } })
+  }
+  if (u.startsWith('https://shellonly.test/wp-json/')) return Response.json([])
   if (u === 'https://api.github.com/repos/RBOWNER/RB/actions/workflows/deploy.yml/dispatches') {
     rebuildDispatches.push(JSON.parse(opts.body || '{}'))
     return new Response('', { status: 202 })
@@ -1388,6 +1415,60 @@ async function main() {
   {
     const raw = await env.VIDEOS.get('idx')
     await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-linky-old' && x !== linkyPub.video?.id)))
+  }
+
+  // ---- a brand-named shell page must not become the video's title ----
+  const brandScrape = await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked/' }),
+  })
+  const brandBody = await brandScrape.json()
+  const brandDraft = brandBody.drafts?.[0] || {}
+  check(
+    'an obfuscated shell titled after its site gets the real headline instead',
+    brandDraft.title === 'Kampala Lady Josephine Record Herself Naked'
+      && brandDraft.sourceUrl === 'https://cdn.darknaija.test/uploads/12/josephine.mp4'
+      && brandDraft.sourceKind === 'file',
+    JSON.stringify({ t: brandDraft.title, s: brandDraft.sourceUrl, k: brandDraft.sourceKind }),
+  )
+  if (brandDraft.id) await admin(`drafts/${brandDraft.id}`, { method: 'DELETE', headers: auth })
+  const shellBody = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://shellonly.test/2026-10-29/kampala-lady-josephine-record-herself-naked/' }),
+  })).json()
+  check(
+    'with the REST API gone too, the permalink slug titles the clip',
+    shellBody.drafts?.[0]?.title === 'Kampala Lady Josephine Record Herself Naked',
+    JSON.stringify(shellBody.drafts?.[0]?.title),
+  )
+  if (shellBody.drafts?.[0]?.id) await admin(`drafts/${shellBody.drafts[0].id}`, { method: 'DELETE', headers: auth })
+  // Published records keep working: re-pasting upgrades a brand-only title
+  // on the existing listing (same source URL → backfill, not a new draft).
+  await env.VIDEOS.put('v:w-brand-title', JSON.stringify({
+    id: 'w-brand-title', kind: 'link', sourceKind: 'file', title: 'DarkNaija',
+    sourceUrl: 'https://cdn.darknaija.test/uploads/12/josephine.mp4', site: 'darknaija.test',
+    category: 'POV', tags: [], description: '', thumbUrl: '', durationSec: 0,
+    createdAt: Date.now(), updatedAt: null,
+  }))
+  await env.VIDEOS.put('idx', JSON.stringify(['w-brand-title', ...JSON.parse((await env.VIDEOS.get('idx')) || '[]')]))
+  const brandRepair = await (await admin('scrape', {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://darknaija.test/2026-10-29/kampala-lady-josephine-record-herself-naked/' }),
+  })).json()
+  const repairedBrand = JSON.parse(await env.VIDEOS.get('v:w-brand-title'))
+  check(
+    're-pasting upgrades a brand-name title on the published listing',
+    brandRepair.drafts.length === 0 && brandRepair.backfilled >= 1
+      && repairedBrand.title === 'Kampala Lady Josephine Record Herself Naked',
+    JSON.stringify({ d: brandRepair.drafts.length, b: brandRepair.backfilled, t: repairedBrand.title }),
+  )
+  await env.VIDEOS.delete('v:w-brand-title')
+  {
+    const raw = await env.VIDEOS.get('idx')
+    await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(raw).filter((x) => x !== 'w-brand-title')))
   }
 
   // ---- automatic sitemap rebuild: one debounced deploy per change burst ----
