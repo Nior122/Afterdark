@@ -2708,6 +2708,31 @@ function hostOf(value) {
   }
 }
 
+/**
+ * Blogs brand their titles: "Real Headline – DarkNaija", "SiteName | Real
+ * Headline". The branding segment carries no video information (and Google
+ * prefers pages whose title IS the content), so drop a leading/trailing
+ * segment that normalizes to the site's own name.
+ */
+function debrandTitle(title, site, host) {
+  const t = String(title || '').trim()
+  if (!t) return ''
+  const brands = [normBrand(site), normBrand(host)].filter(Boolean)
+  if (!brands.length) return t
+  const idx = Math.max(
+    t.lastIndexOf(' | '), t.lastIndexOf(' – '), t.lastIndexOf(' — '),
+    t.lastIndexOf(' · '), t.lastIndexOf(' • '), t.lastIndexOf(' - '),
+  )
+  if (idx > 0) {
+    const head = t.slice(0, idx).trim()
+    const tail = t.slice(idx).replace(/^\s*[|·•–—-]\s*/, '').trim()
+    if (head && brands.includes(normBrand(tail))) return head
+  }
+  const lead = t.match(/^([^|·•–—-]{2,60}?)\s*(?:[|·•]|\s[-–—]\s)\s*(.+)$/)
+  if (lead && lead[2].trim() && brands.includes(normBrand(lead[1]))) return lead[2].trim()
+  return t
+}
+
 function collectTags(...sources) {
   const tags = []
   for (const source of sources) {
@@ -2826,7 +2851,11 @@ function scrapePage(html, pageUrl) {
     host = ''
   }
   const site = metaContent(html, 'og:site_name') || host
-  const pageTitle = cleanTitle(metaContent(html, 'og:title') || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '')
+  const pageTitle = debrandTitle(
+    cleanTitle(metaContent(html, 'og:title') || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ''),
+    site,
+    host,
+  )
   const pageThumb = firstPosterImageUrl(html, pageUrl)
   const pageDescription =
     metaContent(html, 'og:description') || metaContent(html, 'description') || ''
@@ -2879,6 +2908,8 @@ function scrapePage(html, pageUrl) {
     })
   }
 
+  const structuredCount = items.length
+
   // 2) Anchor scan — catches galleries that do not expose JSON-LD.
   if (items.length < 2) {
     const anchorPattern = /<a\b([^>]*)>([\s\S]{0,600}?)<\/a>/gi
@@ -2905,6 +2936,10 @@ function scrapePage(html, pageUrl) {
       if (!sameHost) continue
 
       const linkPath = new URL(absolute).pathname
+      // Nav chrome, never a video: WordPress gives the site logo
+      // `alt="<site name>"`, and this scan used to happily turn that anchor
+      // into the page's only “video” — titled after the brand.
+      if (/^\/?(?:index|home|default)?(?:\.(?:html?|php))?$/i.test(linkPath)) continue
       const looksLikeVideo =
         /\/(video|videos|watch|embed|v|clip|post|p)\/[^/]/i.test(linkPath) ||
         /[?&](v|video|id|watch)=/i.test(absolute)
@@ -2942,8 +2977,11 @@ function scrapePage(html, pageUrl) {
     }
   }
 
-  // 3) Nothing structured: fall back to the page itself as a single video.
-  if (!items.length && pageTitle) {
+  // 3) The page itself as a single video — either because nothing structured
+  // was found, or because the anchor scan only produced gallery siblings
+  // while THIS page carries the playable source: a pasted post link means
+  // “import this post”, not “import its sidebar and logo”.
+  if (pageTitle) {
     const source = pickSourceUrl(
       [
         metaContent(html, 'og:video:secure_url'),
@@ -2957,6 +2995,11 @@ function scrapePage(html, pageUrl) {
       ],
       pageUrl,
     )
+    if (!items.length || (!structuredCount && source?.kind)) {
+      if (items.length) {
+        items.length = 0
+        seen.clear()
+      }
     // A blog serving its brand as the whole title tells us nothing about the
     // video. Permalinks carry the real headline in the last path segment
     // (darknaija: /2026-10-29/kampala-lady-josephine-…/), so prefer that —
@@ -2973,6 +3016,7 @@ function scrapePage(html, pageUrl) {
       tags: collectTags(pageKeywords, usableTitle),
       site,
     })
+    }
   }
 
   if (tgMeta) {
@@ -3230,6 +3274,22 @@ async function createDraftsFromUrl(env, rawUrl) {
   // poster — fetch the embed page once and decorate missing thumbnails and
   // durations before the draft/repair stage.
   for (const item of parsed.items.slice(0, 3)) await decorateEmbedItem(item)
+
+  // Title hygiene, once for every item: a draft must never ship under the
+  // site's brand (logo anchors, obfuscated shells, exotic markup) — that is
+  // not a title. The target's own permalink slug is the fallback, and titles
+  // that merely carry the brand as a " | DarkNaija" suffix get de-branded.
+  for (const item of parsed.items) {
+    const brandRef = parsed.site || hostOf(url)
+    if (isBrandOnly(item.title, brandRef, hostOf(url))) {
+      item.title =
+        titleFromWatchUrl(item.sourceKind === 'page' ? (page.finalUrl || url) : item.sourceUrl) ||
+        titleFromWatchUrl(url) ||
+        item.title
+    } else {
+      item.title = debrandTitle(item.title, brandRef, hostOf(url)) || item.title
+    }
+  }
 
   // Skip anything already published or sitting in a pending draft with the
   // same source URL: a bulk re-scrape should say "duplicate", not double-post.
