@@ -179,6 +179,30 @@ async function run() {
     'rotation: fresh page loads agree inside a window',
     bucketBefore !== bucketAfter || firstPass.join() === secondPass.join(),
   )
+
+  // ---- anti-capture player guard (src/lib/anticapture.ts) ----
+  feedVideos = [{
+    id: 'tg-guard-1', title: 'Guarded File Clip', category: 'Homemade',
+    sourceUrl: 'https://files.example.test/clip.mp4', createdAt: Date.parse('2026-10-10T00:00:00Z'),
+  }]
+  const guardDom = mountApp('/#/watch/tg-guard-1', 'public')
+  await wait(700)
+  const guardVideo = guardDom.window.document.querySelector('[data-capture-guard] video')
+  check(
+    'guard: player hides the native download button and PiP',
+    /nodownload/.test(guardVideo?.getAttribute('controlslist') || '')
+      && Boolean(guardVideo?.hasAttribute('disablepictureinpicture')),
+    JSON.stringify({ c: guardVideo?.getAttribute('controlslist'), p: guardVideo?.hasAttribute('disablepictureinpicture') }),
+  )
+  check(
+    'guard: no raw video URL text is printed anywhere on the page',
+    !guardDom.window.document.body.textContent.includes('files.example.test'),
+  )
+  check(
+    'guard: right-click save paths are disabled on the media element',
+    guardVideo?.hasAttribute('controls') && !/[?&]download=/.test(guardVideo?.getAttribute('src') || '')
+      && Boolean(guardDom.window.document.querySelector('[data-capture-guard]')),
+  )
   feedVideos = []
 
   dom = mountApp('/v/v-pov-tatum-christine/', 'direct')

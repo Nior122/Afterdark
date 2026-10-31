@@ -170,7 +170,10 @@ from private chats/channels that the public embed cannot reach. A tiny Cloudflar
 a JSON feed at `/api/videos` (each video carries its real `views` count), and proxies
 playback/thumbnails so the bot token never reaches the browser — the same proxy now also serves
 scraped external `.mp4`s and posters, which is what makes hotlink-protecting blogs (the
-"broken link when I press play" case) play normally. Index writes are verified and retried, and
+"broken link when I press play" case) play normally. The public feed hands out **only** the
+proxied URL for `.mp4` records — the source blog's raw link is never published to visitors (it
+lives in the Worker's KV and the admin API, which are the owner's pages), so there is nothing on
+the site for a scraper to copy. Index writes are verified and retried, and
 opening the admin dashboard re-indexes any record that was ever stored but never listed — so a
 video the bot confirmed as published can no longer quietly vanish. The site merges that feed into
 the catalogue when the build-time variable `VITE_TELEGRAM_FEED_URL` is set (GitHub repo variable
@@ -261,7 +264,7 @@ baked into the build, so none of it needs a rebuild:
 | `/library` | History / Watch later / Liked shortcuts + videos you added |
 | `/history`, `/watch-later`, `/liked` | Collections, all persisted |
 | `/results?q=…` | Search across adult videos, channels, categories and tags |
-| `/watch/:id` | Player, like/save/share, expandable description, "Up next" rail |
+| `/watch/:id` | Player, like/save/share, expandable description, "Up next" rail. Capture-deterred: no native download button or PiP, right-click save disabled, the player blanks while the tab is unfocused, print-to-PDF renders black, and no raw file URL is ever shown under the video |
 
 There are no accounts, profiles or comment sections: nothing requires a login, and channel
 names are attribution metadata only (`/channel/:id` routes do not exist). Videos you add are

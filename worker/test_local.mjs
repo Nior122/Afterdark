@@ -550,7 +550,15 @@ async function main() {
     JSON.stringify(feed.map((video) => video.createdAt)),
   )
   const scraped = feed.find((x) => x.title.startsWith('Hotel Hookup')) || {}
-  check('scraped source is the mp4', scraped.sourceUrl === 'https://cdn.sometube.test/videos/hotel.mp4', JSON.stringify(scraped))
+  check(
+    'feed carries only the proxy for a scraped mp4 — never the raw URL',
+    scraped.sourceUrl == null && scraped.streamUrl === `https://worker.test/api/videos/${scraped.id}/stream.mp4`,
+    JSON.stringify(scraped),
+  )
+  {
+    const hotelRecord = JSON.parse((await env.VIDEOS.get(`v:${scraped.id}`)) || '{}')
+    check('the raw mp4 stays on the private record', hotelRecord.sourceUrl === 'https://cdn.sometube.test/videos/hotel.mp4', JSON.stringify(hotelRecord.sourceUrl))
+  }
   check('scraped duration parsed', scraped.durationSec === 754, JSON.stringify(scraped.durationSec))
   check('scraped description kept', scraped.description?.includes('hotel room scene'))
   check('scraped tags/category kept', scraped.category === 'MILF' && scraped.tags.length > 0)
@@ -584,8 +592,8 @@ async function main() {
   feed = await feedOf(env)
   const fluidVideo = feed.find((x) => x.title?.includes('Trending Clip')) || {}
   check(
-    'js-config mp4 becomes the playable source',
-    fluidVideo.sourceUrl === 'https://videos.blog.test/wp/uploads/2026/08/Trending-Clip.mp4',
+    'js-config mp4 becomes the playable source — proxied, raw URL hidden from the feed',
+    fluidVideo.sourceUrl == null && String(fluidVideo.streamUrl || '').endsWith(`/api/videos/${fluidVideo.id}/stream.mp4`),
     JSON.stringify(fluidVideo).slice(0, 200),
   )
   check(
@@ -1199,10 +1207,14 @@ async function main() {
   )
   const afterRepair = (await feedOf(env)).find((v) => v.id === stalePage.id) || {}
   check(
-    'repaired record now plays the REST-found file',
-    (afterRepair.sourceUrl || '').endsWith('/uploads/7/baddie.mp4'),
-    JSON.stringify(afterRepair.sourceUrl),
+    'repaired record now plays the REST-found file (via proxy, raw URL hidden)',
+    String(afterRepair.streamUrl || '').endsWith(`/api/videos/${stalePage.id}/stream.mp4`) && afterRepair.sourceUrl == null,
+    JSON.stringify(afterRepair).slice(0, 160),
   )
+  {
+    const repairedRec = JSON.parse((await env.VIDEOS.get(`v:${stalePage.id}`)) || '{}')
+    check('the repaired raw file URL stays on the private record', String(repairedRec.sourceUrl || '').endsWith('/uploads/7/baddie.mp4'), JSON.stringify(repairedRec.sourceUrl))
+  }
   check(
     'repaired record gained the poster (served via the thumb proxy)',
     afterRepair.thumbUrl === `https://worker.test/api/videos/${stalePage.id}/thumb.jpg`,
