@@ -58,6 +58,12 @@
  *   Var     SITE_URL              your site's origin (e.g. https://rawclips.
  *                                 pages.dev) — /admin turns it into a link to
  *                                 the dashboard.
+ *   Var     FEED_MEMO_MS          KV-read memo window for the public feed and
+ *                                 proxied media, in ms (default 60000; 0 turns
+ *                                 it off). Publishes, deletes and re-paste
+ *                                 repairs invalidate the memo immediately
+ *                                 either way — the TTL only caps unrelated
+ *                                 drift like view counts.
  *   Var     ALLOWED_CHANNEL_IDS   comma-separated channel IDs whose posts are
  *                                 auto-published when the bot is a channel admin.
  *                                 The -100 supergroup prefix is optional — a bare
@@ -240,7 +246,73 @@ const PUBLIC_API_CORS = {
   'Access-Control-Max-Age': '86400',
 }
 
+/**
+ * KV bills every get() against the daily quota (100k free) even when the edge
+ * answers from cache, and this Worker's public paths were read-hungry by
+ * design: one /api/videos page view = index + one record + one view counter
+ * per catalogue video (~500 reads at 250 videos), every proxied thumbnail or
+ * byte-range seek = one more. So both public read paths memoize in-isolate
+ * for 60 seconds — the exact freshness the feed's `Cache-Control` already
+ * promises visitors — and `markCatalogChanged` (which every publish, delete,
+ * bulk edit, rename and re-paste repair already runs through) bumps the
+ * generation, so a change flips the very next request. Admin, bot and
+ * internal reads stay un-memoized: the owner always sees live data.
+ */
+const FEED_MEMO_MS = 60_000
+
+function feedMemo(env) {
+  let m = env.__memo
+  if (!m) {
+    const configured = Number(env.FEED_MEMO_MS)
+    m = {
+      ttl: Number.isFinite(configured) && configured >= 0 ? configured : FEED_MEMO_MS,
+      gen: 0,
+      feedBody: '', feedAt: 0, feedGen: -1, feedOrigin: '',
+      recs: new Map(), recsAt: 0, recsGen: -1,
+    }
+    try {
+      Object.defineProperty(env, '__memo', { value: m, writable: true, configurable: true })
+    } catch {
+      // A frozen env just means no memo — every path below is still correct.
+    }
+  }
+  return m
+}
+
+function bumpFeedMemo(env) {
+  const m = env.__memo
+  if (m) m.gen += 1
+}
+
+/** readVideo with a short public-use TTL; negative results count too. */
+async function readVideoMemo(env, id) {
+  const m = feedMemo(env)
+  if (m.ttl <= 0) return readVideo(env, id)
+  const now = Date.now()
+  if (m.recsGen !== m.gen || now - m.recsAt >= m.ttl) {
+    m.recs.clear()
+    m.recsGen = m.gen
+    m.recsAt = now
+  }
+  if (m.recs.has(id)) return m.recs.get(id)
+  const record = await readVideo(env, id)
+  if (m.recs.size > 4096) m.recs.clear() // probe-flood guard
+  m.recs.set(id, record)
+  return record
+}
+
 async function handleFeed(env, origin) {
+  const m = feedMemo(env)
+  if (m.ttl > 0 && m.feedBody && m.feedGen === m.gen && m.feedOrigin === origin && Date.now() - m.feedAt < m.ttl) {
+    return new Response(m.feedBody, {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=60',
+        'X-Feed-Cache': 'hit',
+      },
+    })
+  }
   const ids = await readIndex(env)
   const [records, counts] = await Promise.all([
     Promise.all(ids.map((id) => readVideo(env, id))),
@@ -294,7 +366,14 @@ async function handleFeed(env, origin) {
           : null,
       }
     })
-  return new Response(JSON.stringify({ videos }), {
+  const feedBody = JSON.stringify({ videos })
+  if (m.ttl > 0) {
+    m.feedBody = feedBody
+    m.feedAt = Date.now()
+    m.feedGen = m.gen
+    m.feedOrigin = origin
+  }
+  return new Response(feedBody, {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
@@ -710,6 +789,7 @@ async function scheduleRebuild(env) {
 
 /** Record a catalogue change; safe to await, cheap when disabled. */
 async function markCatalogChanged(env) {
+  bumpFeedMemo(env)
   try {
     return await scheduleRebuild(env)
   } catch {
@@ -1108,7 +1188,7 @@ function mediaStreamUrl(video, origin) {
 }
 
 async function handleMedia(env, id, kind, request) {
-  const video = await readVideo(env, id)
+  const video = await readVideoMemo(env, id)
   if (!video) return new Response('Not found', { status: 404 })
   const fileId = kind === 'video' ? video.fileId : video.thumbFileId
   if (!fileId) {
