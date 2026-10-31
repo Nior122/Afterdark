@@ -55,8 +55,13 @@
  *   Var     ALLOWED_USER_IDS      comma-separated Telegram user IDs allowed to
  *                                 publish. If unset, the first person to send
  *                                 /start becomes the owner (stored in KV).
+ *   Var     SITE_URL              your site's origin (e.g. https://rawclips.
+ *                                 pages.dev) — /admin turns it into a link to
+ *                                 the dashboard.
  *   Var     ALLOWED_CHANNEL_IDS   comma-separated channel IDs whose posts are
  *                                 auto-published when the bot is a channel admin.
+ *                                 The -100 supergroup prefix is optional — a bare
+ *                                 id or the @name both match (sameChatId).
  *   Secrets GITHUB_TOKEN + Var/Secret GITHUB_REPO  enable the dashboard's
  *                                 "Rebuild site" button AND the automatic,
  *                                 debounced rebuild after every publish (keeps
@@ -79,6 +84,10 @@
  * Bot commands (in a chat with the bot)
  * -------------------------------------
  *   /start            claim ownership (first run) + help
+ *   /help  /menu      re-print this guide; both also register the bot's
+ *                     command menu with Telegram (once a day — see syncBotMenu)
+ *   /admin            point the owner at the site dashboard (/admin on the site;
+ *                     set SITE_URL to make it a real link)
  *   /id               show your Telegram user ID
  *   /videos           every video this bot published, with Rename / Delete
  *   /list             same as /videos
@@ -1333,20 +1342,13 @@ async function processMessage(msg, env) {
     const command = commandRaw.split('@')[0].toLowerCase()
     const arg = rest.join(' ').trim()
 
-    if (command === '/start') {
+    if (command === '/start' || command === '/help' || command === '/menu') {
+      await syncBotMenu(env)
       return send(env, chatId,
-        (owner.claimedNow
+        (command === '/start' && owner.claimedNow
           ? '✅ You are now the owner of this bot — only you can publish videos.\n\n'
           : '👋 AfterDark publisher bot.\n\n') +
-        'Forward or send me a video and I will post it on the website with its real thumbnail.\n' +
-        'Or paste a link (page, gallery, embed) and I will scrape it into a draft you can review.\n' +
-        '• Caption line 1 becomes the title; links are removed from caption text\n' +
-        '• Workers AI writes a fresh description with emojis and hashtags on every upload\n' +
-        '• Extra caption text and hashtags guide the AI but are not published directly\n' +
-        '• Videos must be 20 MB or smaller (Telegram bot limit)\n\n' +
-        'Commands: /videos · /pending · /caption · /add <url> · /rename <id> <title> · /remove <id> · /id\n' +
-        'Site: /mode · /redirect <url|off> · /ads <on|off>\n' +
-        'Nothing scraped is published until you press ✅ Publish.')
+        helpText())
     }
     if (command === '/id') {
       return send(env, chatId, `Your Telegram user ID: ${userId}`)
@@ -1445,11 +1447,22 @@ async function processMessage(msg, env) {
       const ok = await removeVideo(env, arg)
       return send(env, chatId, ok ? `🗑 Removed ${arg} from the website.` : `No video with id ${arg}.`)
     }
+    if (command === '/admin') {
+      if (!owner.isOwner) return deny(env, chatId, userId)
+      const site = String(env.SITE_URL || '').trim().replace(/\/+$/, '')
+      return send(env, chatId,
+        site
+          ? `🖥 The full dashboard lives on the site itself:\n${site}/admin\n` +
+            'Sign in there with your ADMIN_TOKEN — videos, drafts, scrape, ads, mode and settings all live there.'
+          : '🖥 Administration happens on the site dashboard, not in this bot: open https://<your-site>/admin ' +
+            '(the domain your Pages project serves) and sign in with your ADMIN_TOKEN.\n' +
+            'Tip: set the SITE_URL variable in the Worker settings and this command can link straight to it.')
+    }
     if (command === '/cancel') {
       await clearState(env, userId)
       return send(env, chatId, 'Cancelled.')
     }
-    return send(env, chatId, 'Unknown command. Send me a video or a link, or try /videos.')
+    return send(env, chatId, 'Unknown command. Send me a video or a link — /help lists everything I take.')
   }
 
   // 1) A video file: keep the original instant-publish behaviour.
@@ -1498,7 +1511,7 @@ async function processChannelPost(post, env) {
   const video = extractVideo(post)
   if (chatId == null || !video) return
   const allowed = parseIdList(env.ALLOWED_CHANNEL_IDS)
-  if (allowed.includes(String(chatId))) {
+  if (allowed.some((id) => sameChatId(id, chatId))) {
     await ingest(env, video, post.caption || '', 'channel')
     return
   }
@@ -4065,6 +4078,53 @@ async function tg(env, method, body) {
   }
 }
 
+/** The slash-menu Telegram shows beside the input field, once registered. */
+const BOT_MENU = [
+  { command: 'start', description: 'Re-introduce the bot' },
+  { command: 'help', description: 'What this bot can do' },
+  { command: 'videos', description: 'Published videos' },
+  { command: 'pending', description: 'Drafts waiting for publish' },
+  { command: 'add', description: 'Scrape a link: /add <url>' },
+  { command: 'rename', description: '/rename <id> <new title>' },
+  { command: 'remove', description: '/remove <id>' },
+  { command: 'mode', description: 'Switch public / direct-link mode' },
+  { command: 'redirect', description: '/redirect <url> or /redirect off' },
+  { command: 'ads', description: '/ads on or /ads off' },
+  { command: 'caption', description: 'AI caption agent status' },
+  { command: 'id', description: 'Your Telegram user id' },
+]
+
+/**
+ * Telegram can only list commands the bot registered — owners otherwise see
+ * an empty menu and assume the bot is broken. Register once a day; the KV
+ * marker keeps the call off every message, and a network failure leaves no
+ * marker so the next /start or /help tries again.
+ */
+async function syncBotMenu(env) {
+  try {
+    if (await env.VIDEOS.get('menuSynced')) return
+    const result = await tg(env, 'setMyCommands', { commands: BOT_MENU, scope: { type: 'all_private_chats' } })
+    if (result) await env.VIDEOS.put('menuSynced', String(Date.now()), { expirationTtl: 86400 })
+  } catch {
+    // A missing menu must never break the message path.
+  }
+}
+
+/** The shared how-to, shown by /start and /help alike. */
+function helpText() {
+  return (
+    'Forward or send me a video and I will post it on the website with its real thumbnail.\n' +
+    'Or paste a link (page, gallery, embed) and I will scrape it into a draft you can review.\n' +
+    '• Caption line 1 becomes the title; links are removed from caption text\n' +
+    '• Workers AI writes a fresh description with emojis and hashtags on every upload\n' +
+    '• Extra caption text and hashtags guide the AI but are not published directly\n' +
+    '• Videos must be 20 MB or smaller (Telegram bot limit)\n\n' +
+    'Commands: /videos · /pending · /caption · /add <url> · /rename <id> <title> · /remove <id> · /id\n' +
+    'Site: /mode · /redirect <url|off> · /ads <on|off>\n' +
+    'Nothing scraped is published until you press ✅ Publish.'
+  )
+}
+
 function send(env, chatId, text) {
   return tg(env, 'sendMessage', {
     chat_id: chatId,
@@ -4108,6 +4168,22 @@ function truncate(value, limit) {
 
 function parseIdList(value) {
   return (value || '').split(',').map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * Telegram chats are addressed by negative ids (-100123…) but owners type
+ * whatever number they see — from @username.to_id, from an error, from the
+ * admin log — usually bare digits. Compare on digits only so `2188686361`,
+ * `-1002188686361` and `-100 2188686361` all identify the same channel.
+ */
+function sameChatId(a, b) {
+  const digits = (v) => String(v ?? '').trim().replace(/^@/, '').replace(/[^\d]/g, '')
+  const x = digits(a)
+  const y = digits(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  // one side kept the -100 supergroup prefix, the other dropped it
+  return x === `100${y}` || y === `100${x}`
 }
 
 function titleCase(s) {

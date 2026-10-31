@@ -293,12 +293,32 @@ out of search results.
 If you later run a channel (public *or* private) and want every video post
 to appear on the site automatically:
 
-1. Add the bot as an **administrator** of the channel.
+1. Add the bot as an **administrator** of the channel (keep *Post Messages*
+   on — that is what lets it see the posts).
 2. Post a video in the channel. The bot will DM you the channel's numeric ID
-   (nothing is published yet).
-3. In the Worker → **Settings → Variables and Secrets**, add a plain variable
-   `ALLOWED_CHANNEL_IDS` with that ID (comma-separated for several) and deploy.
-4. New video posts in that channel now publish automatically.
+   (nothing is published yet). That message is also proof the channel's posts
+   actually reach the Worker.
+3. In the Worker → **Settings → Variables and Secrets**, add a **plain
+   variable** (a secret works too — both reach the Worker the same way, a
+   variable is just visible when you want to edit it) named
+   `ALLOWED_CHANNEL_IDS` with that ID, then **Save and Deploy**. The ID format
+   is forgiving: `2188686361`, `-1002188686361` and `-100 2188686361` all
+   match the same channel. Comma-separate for several channels.
+4. New video posts in that channel now publish automatically — caption line 1
+   becomes the title, hashtags set the category, the AI agent (when enabled)
+   writes the description. Only posts containing a **video** are ingested
+   (text/photo/link posts are left alone), and files over Telegram's 20 MB
+   bot limit can't be pulled — post a public `t.me` link for those instead.
+
+Re-posting the same file does not duplicate the listing, and the channel's
+videos go through the same proxy as everything else, so the source channel can
+stay private.
+
+The bot's own **command menu** is registered with Telegram by itself: the
+first `/start` (or any `/help`/`/menu`) syncs it once a day — no BotFather
+`/setcommands` needed. `/help` lists every command; `/admin` links to the
+site's dashboard (set variable `SITE_URL` to your site's origin so the link is
+real).
 
 ## Troubleshooting
 
@@ -310,6 +330,8 @@ to appear on the site automatically:
 | "I could not read that page" | The site blocked the Worker (403/Cloudflare challenge/JS-only). Paste the direct embed link, forward the file, or use a public `t.me` post. |
 | Scraped video has the wrong title | Press ✏️ Edit title on the draft card before publishing, or /rename the id afterwards. |
 | Wrong category | 🏷 Category on the draft card; re-infer it from the page's keywords if they were unclear. |
+| `/help` says "Unknown command", or the bot's `/` menu is empty | The Worker is old. Redeploy the latest `worker/worker.js` — current code answers `/help`/`/menu` and registers the full command menu with Telegram by itself (first `/start`). Commands like `/admin` are bot shortcuts to information; the admin dashboard itself is the **website's** `/admin` page, not a chat command. |
+| Channel video posted, nothing appears | The bot must be a channel **administrator**, and the channel must be in `ALLOWED_CHANNEL_IDS` — any ID format works now (bare digits or with `-100`). If posting a video never even earned you a 📺 DM, Telegram isn't delivering `channel_post` updates: open `https://api.telegram.org/bot<TOKEN>/getWebhookInfo` and make sure `allowed_updates` is empty or includes `channel_post` (re-run the Step 5 `setWebhook` URL exactly as documented — it subscribes to everything). |
 | Dashboard says "admin-disabled" | Set the `ADMIN_TOKEN` secret on the Worker and redeploy. |
 | Video's title is just the site name (e.g. “DarkNaija”) | The source blog serves bots an obfuscated shell whose only title is its own brand; the real headline never was on that markup. The current Worker strips the brand off titles (“Headline – DarkNaija” → “Headline”), ignores logo/nav anchors so they can't masquerade as the video, lets the post's own download link win over sidebar thumbnails, and falls back to the WordPress REST post title or the URL slug (`/2026/10/29/kampala-lady-josephine-…/` → “Kampala Lady Josephine …”). Re-paste the link to upgrade an already-published listing in place — no delete/re-add. |
 | New video isn't in sitemap.xml yet | The static sitemap is generated at build time: with a rebuild target set on the Worker (`GITHUB_TOKEN`/`GITHUB_REPO`, or `CLOUDFLARE_BUILD_HOOK` for Cloudflare Pages) it triggers itself a few minutes after each publish (or press **Rebuild site** in the dashboard; a nightly workflow covers anything missed on the GitHub copy). On Cloudflare Pages the video is already indexable regardless — its page is built live from the feed. Direct links work immediately either way. Full matrix: [google-search-console.md](google-search-console.md). |

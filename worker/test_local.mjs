@@ -17,6 +17,7 @@ const MP4 = new TextEncoder().encode('0123456789ABCDEFGHIJ') // fake video bytes
 const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])
 
 let sentMessages = []
+const menuCalls = []
 let editedMessages = []
 let answeredCallbacks = []
 
@@ -228,6 +229,10 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u === `https://api.telegram.org/bot${TOKEN}/answerCallbackQuery`) {
     answeredCallbacks.push(JSON.parse(opts.body))
     return Response.json({ ok: true, result: {} })
+  }
+  if (u === `https://api.telegram.org/bot${TOKEN}/setMyCommands`) {
+    menuCalls.push(JSON.parse(opts.body))
+    return Response.json({ ok: true, result: true })
   }
   if (u === `https://api.telegram.org/bot${TOKEN}/getFile`) {
     const { file_id } = JSON.parse(opts.body)
@@ -495,6 +500,26 @@ async function main() {
   await webhook(env, videoMsg(222, 'stranger1'))
   check('stranger video denied', lastText().includes('not authorised'))
   check('feed still empty', (await feedOf(env)).length === 0)
+
+  console.log('— bot commands: /help, the slash-menu, /admin')
+  sentMessages = []
+  check('/start already registered the slash-menu with Telegram',
+    menuCalls.length === 1 && Array.isArray(menuCalls[0].commands) && menuCalls[0].commands.some((c) => c.command === 'help'),
+    JSON.stringify(menuCalls).slice(0, 140))
+  check('menu registration is scoped to private chats', menuCalls[0]?.scope?.type === 'all_private_chats', JSON.stringify(menuCalls[0]?.scope))
+  await webhook(env, textMsg(111, '/help'))
+  check('/help re-prints the same guide /start gives', lastText().includes('Commands: /videos') && lastText().includes('Nothing scraped is published until'), lastText())
+  await webhook(env, textMsg(111, '/menu'))
+  await webhook(env, textMsg(111, '/help'))
+  check('menu sync runs once a day, not per message', menuCalls.length === 1)
+  await webhook(env, textMsg(111, '/quarantine'))
+  check('unknown command points at /help', lastText().includes('/help'), lastText())
+  await webhook(env, textMsg(111, '/admin'))
+  check('/admin names the dashboard and the SITE_URL hint', lastText().includes('/admin') && lastText().includes('SITE_URL'), lastText())
+  env.SITE_URL = 'https://rawclips.pages.dev'
+  await webhook(env, textMsg(111, '/admin'))
+  check('/admin links the dashboard once SITE_URL is set', lastText().includes('https://rawclips.pages.dev/admin'), lastText())
+  delete env.SITE_URL
 
   console.log('— publishing by forward (unchanged behaviour)')
   await webhook(env, videoMsg(111, 'uniqA'))
@@ -1664,6 +1689,50 @@ async function main() {
   )
   await env.VIDEOS.delete('rebuild:last')
   await env.VIDEOS.delete('rebuild:queued')
+
+  console.log('— channel auto-post: ALLOWED_CHANNEL_IDS is id-format tolerant')
+  {
+    const chanPost = (chatId, uniq) => ({
+      channel_post: {
+        message_id: 7, date: 0,
+        chat: { id: chatId, type: 'channel', title: 'Raw Clips' },
+        caption: 'Channel drop #POV',
+        video: {
+          file_id: `vid-${uniq}`, file_unique_id: uniq, file_name: 'chan.mp4',
+          duration: 60, width: 720, height: 1280, file_size: 5 * 1048576,
+          thumbnail: { file_id: `thumb-${uniq}` },
+        },
+      },
+    })
+    const feedBefore = (await feedOf(env)).length
+    // Owners type whatever number they were shown — the bare id without the
+    // -100 supergroup prefix must still match the real (negative) chat id.
+    env.ALLOWED_CHANNEL_IDS = '2188686361'
+    await webhook(env, chanPost(-1002188686361, 'chanBare'))
+    const afterBare = await feedOf(env)
+    check('a bare channel id in ALLOWED_CHANNEL_IDS matches the -100 post',
+      afterBare.length === feedBefore + 1 && afterBare.some((v) => /^Channel [Dd]rop$/.test(v.title || '')),
+      JSON.stringify({ before: feedBefore, after: afterBare.length }))
+    env.ALLOWED_CHANNEL_IDS = '-1002188686361'
+    await webhook(env, chanPost(-1002188686361, 'chanFull'))
+    const afterFull = await feedOf(env)
+    check('the full -100 form matches too (same channel, second file)',
+      afterFull.length === feedBefore + 2, JSON.stringify(afterFull.length))
+    // An unlisted channel publishes nothing and nags the owner once — with
+    // the exact id to paste.
+    env.ALLOWED_CHANNEL_IDS = '999999999'
+    sentMessages = []
+    await webhook(env, chanPost(-100123123123, 'chanStranger'))
+    check('an unlisted channel never auto-publishes', (await feedOf(env)).length === feedBefore + 2)
+    check('and the owner is told which id to add',
+      lastText().includes('ALLOWED_CHANNEL_IDS') && lastText().includes('-100123123123'), lastText())
+    delete env.ALLOWED_CHANNEL_IDS
+    for (const rec of (await feedOf(env)).filter((x) => /^Channel [Dd]rop$/.test(x.title || ''))) {
+      await env.VIDEOS.delete(`v:${rec.id}`)
+      const rawIdx = await env.VIDEOS.get('idx')
+      await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(rawIdx || '[]').filter((x) => x !== rec.id)))
+    }
+  }
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
