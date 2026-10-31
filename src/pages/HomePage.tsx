@@ -2,8 +2,10 @@ import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import CategoryBar from '../components/CategoryBar'
 import Section from '../components/Section'
+import ShortsGrid from '../components/ShortsGrid'
 import VideoGrid from '../components/VideoGrid'
 import { browsePath, CATEGORIES, videoMatchesCategory } from '../data/seed'
+import { isShortVideo } from '../lib/video'
 import { useStore } from '../lib/store'
 import { usePageTitle } from '../lib/hooks'
 
@@ -14,6 +16,11 @@ export default function HomePage() {
   const recommendedAds = ads.slice(0, 4)
   const trendingAds = ads.slice(4, 8)
   const latest = allVideos
+  // Clips under a minute get their own Shorts wall; everything longer — and
+  // anything without a trustworthy duration — stays in the regular
+  // chronological list right below it.
+  const shorts = latest.filter((video) => isShortVideo(video))
+  const longForm = latest.filter((video) => !isShortVideo(video))
 
   const popularCategories = CATEGORIES.filter((category) => category !== 'All')
     .map((category) => ({
@@ -44,9 +51,15 @@ export default function HomePage() {
         </Section>
       )}
 
-      {latest.length > 0 && (
+      {shorts.length > 0 && (
+        <Section title="Shorts">
+          <ShortsGrid videos={shorts} />
+        </Section>
+      )}
+
+      {longForm.length > 0 && (
         <Section title="Latest videos">
-          <VideoGrid videos={latest} chronological />
+          <VideoGrid videos={longForm} chronological />
         </Section>
       )}
 
