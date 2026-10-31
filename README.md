@@ -191,6 +191,8 @@ What the bot does:
 | **Rename** | `/rename <id> <title>`, or ✏️ Rename in the list |
 | **Full list + delete** | `/videos` pages through every published video (5 per page) with Rename/Delete buttons; delete asks for confirmation |
 | Drafts | `/pending` to see what is waiting; drafts expire after 7 days |
+| **Channel auto-post** | Make the bot an admin of a channel, list its id in `ALLOWED_CHANNEL_IDS` (with or without the `-100` prefix) and every video posted there publishes instantly — caption line 1 as the title, no duplicate re-posts, private channels included; an unlisted channel just earns the owner a DM with the exact id to add |
+| **Commands & menu** | `/help` (or `/menu`) prints the guide, and the bot registers its own Telegram slash-menu once a day — no BotFather setup. `/admin` links to the web dashboard (set `SITE_URL` for the real address) |
 | **Switch site mode** | `/mode` — public catalogue ⇄ direct links only, applied live |
 | **Admin dashboard** | `/admin/` does the same jobs in a web page, and more: mode switch, home-page redirect, ad slots (per-slot enable + preview outlines), search/filter/sort, bulk delete/recategorise, bulk link scraping, review/publish drafts, rebuild the site. Works in **both** modes |
 
