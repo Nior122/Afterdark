@@ -212,7 +212,9 @@ many) clears its counter.
 
 Scraped videos are link-only: the Worker stores the source URL and metadata, never the file,
 and the site plays them through its usual shielded player. Telegram bots can only fetch files
-up to 20 MB, so larger files still go through public `t.me` links or a scraped embed URL.
+up to 20 MB, so larger files still go through public `t.me` links or a scraped embed URL — the
+bot keeps no permanent copy of an oversized upload, it holds a five-minute note about it
+("why not") and KV then deletes it on its own.
 Note that some sites block server-side requests (403 / JavaScript challenge); the bot reports
 that and suggests pasting the direct embed link instead.
 

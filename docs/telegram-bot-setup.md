@@ -17,7 +17,9 @@ How it works, in one line:
   whoever has it controls the bot.
 - 🎞 Telegram limits bots to files of **20 MB or smaller**. Bigger videos are
   refused by the bot with an explanation (compress them, or keep using
-  public `t.me` post links for those).
+  public `t.me` post links for those). The refusal is never stored: the bot
+  keeps a note of it for 5 minutes and then deletes it automatically, so
+  unpostable files don't pile up anywhere.
 
 ---
 
@@ -309,6 +311,8 @@ to appear on the site automatically:
    writes the description. Only posts containing a **video** are ingested
    (text/photo/link posts are left alone), and files over Telegram's 20 MB
    bot limit can't be pulled — post a public `t.me` link for those instead.
+   (An over-limit channel video also leaves no trace: it is never listed and
+   its internal note self-deletes after 5 minutes.)
 
 Re-posting the same file does not duplicate the listing, and the channel's
 videos go through the same proxy as everything else, so the source channel can
@@ -349,7 +353,7 @@ real).
 | Dashboard "not responding" / stuck on **Checking…** | Every dashboard call now has a 15 s deadline, so a hung Worker reports "The Worker at … did not answer within 15 s" instead of spinning forever. That message means the `VITE_TELEGRAM_FEED_URL` baked into the site build points at an origin that accepts connections but never answers (a sleeping host, a wrong URL that still resolves). Open `https://<YOUR_WORKER>.workers.dev/health` in a browser to confirm the Worker itself is live; redeploy the Worker if it is not, or fix the Pages environment variable and re-run the site build. A fresh push to `main` also takes 1–2 minutes to deploy — hard-reload (`Ctrl+Shift+R`) before diagnosing. |
 | Site / dashboard keeps **redirecting** to an old address | Two separate things, both addressed in code now. (1) The direct-mode home redirect only applies while **direct mode is on with a redirect URL set**, and it never touches `/v/<id>/`, `/admin`, assets or crawler files; turn it off with `/mode public` (or the dashboard toggle) and it is gone within 60 s — the edge caches settings for a minute. (2) Pages used to answer a bare `/admin` with a permanent `308` to `/admin/`; a browser that once cached that (or an older redirect) replays it forever without asking the network, which looks like a stuck redirect. `functions/_middleware.ts` now serves `/admin` and `/admin/` with a plain `200` **before** anything is fetched, so the dashboard can never bounce. If your browser is already holding a stale entry, clear it once: DevTools → Network → **Disable cache** and reload (or clear site data for the Pages domain) — afterwards the redirect-free replies keep it clean. |
 | Sign-in lands on **"Something went wrong"** (e.g. `Cannot read properties of undefined (reading 'enabled')`) | That was the dashboard crashing on a Worker older than the site: the deployed `/api/admin/settings` didn't return the `ads`/`slots` fields the new UI read unguarded. The client now normalises such replies (the dashboard opens, showing defaults for whatever the old Worker lacks) — but to make ads, bulk actions and views actually save and count, **redeploy the Worker** from the current `worker/worker.js` (Steps 2–3, or the "Upgrading an existing Worker" note). |
-| "⚠️ … up to 20 MB" | Hard platform limit: bots can only download files up to 20 MB. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or **keep the big file out of the bot entirely**: post it in a **public** channel, copy the post's `https://t.me/<name>/<id>` link and add that (bot `/add <link>` or the dashboard's *Add from link*). The video then links straight to the Telegram post page — no file ever passes through the bot, any size. |
+| "⚠️ … up to 20 MB" | Hard platform limit: bots can only download files up to 20 MB. Re-send a compressed copy (send as *video*, not *file*, in Telegram and pick a lower quality), or **keep the big file out of the bot entirely**: post it in a **public** channel, copy the post's `https://t.me/<name>/<id>` link and add that (bot `/add <link>` or the dashboard's *Add from link*). The video then links straight to the Telegram post page — no file ever passes through the bot, any size. Nothing to clean up after a refusal: the bot keeps no permanent record of it, only a note that self-deletes 5 minutes later (rows saved by older deploys are swept automatically on the next dashboard open). |
 | "That is a private Telegram link" | `t.me/c/…`, `t.me/+…` and `t.me/joinchat/…` links are member-only pages — no scraper, bot or dashboard can open them, so both refuse these **instantly** with this message instead of timing out. Fix: Channel Settings → Channel Type → **Public**, then **re-copy** the post link (old `/c/` links stay member-only even after the channel goes public — the new link reads `https://t.me/<name>/<id>`). |
 | Token leaked | In @BotFather send `/revoke`, put the new token in the `BOT_TOKEN` secret, repeat Step 5. Old file links keep working via the Worker. |
 

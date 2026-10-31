@@ -425,10 +425,10 @@ globalThis.fetch = async (url, opts = {}) => {
 }
 
 class MockKV {
-  constructor() { this.map = new Map() }
+  constructor() { this.map = new Map(); this.ttls = new Map() }
   async get(k) { return this.map.has(k) ? this.map.get(k) : null }
-  async put(k, v) { this.map.set(k, String(v)) }
-  async delete(k) { this.map.delete(k) }
+  async put(k, v, options) { this.map.set(k, String(v)); this.ttls.set(k, options?.expirationTtl ?? null) }
+  async delete(k) { this.map.delete(k); this.ttls.delete(k) }
   async list({ prefix = '', limit = 1000 } = {}) {
     return {
       keys: [...this.map.keys()].filter((k) => k.startsWith(prefix)).slice(0, limit).map((name) => ({ name })),
@@ -541,8 +541,45 @@ async function main() {
   check('feed still 1 after duplicate', (await feedOf(env)).length === 1)
 
   await webhook(env, videoMsg(111, 'uniqBig', { file_size: 25 * 1048576 }))
-  check('oversize warned', lastText().includes('20 MB'))
+  check('oversize warned', lastText().includes('20 MB') && lastText().includes('5 minutes'), lastText())
   check('oversize not in feed', (await feedOf(env)).length === 1)
+  {
+    // The unpostable copy is a note, not a catalogue row: its KV write
+    // carries a five-minute expiry, it never joins the index, and a re-send
+    // re-warns instead of claiming "already on the website".
+    const bigKey = [...env.VIDEOS.map.keys()].find(
+      (k) => k.startsWith('v:') && JSON.parse(env.VIDEOS.map.get(k)).tooLarge,
+    )
+    check('oversize note carries a 5-minute expiry', Boolean(bigKey) && env.VIDEOS.ttls.get(bigKey) === 300)
+    check('playable records still write without any expiry',
+      [...env.VIDEOS.map.keys()]
+        .filter((k) => k.startsWith('v:') && !JSON.parse(env.VIDEOS.map.get(k)).tooLarge)
+        .every((k) => env.VIDEOS.ttls.get(k) == null))
+    check('oversize note never joins the index', (JSON.parse(env.VIDEOS.map.get('idx')) || []).length === 1)
+    await webhook(env, videoMsg(111, 'uniqBig', { file_size: 25 * 1048576 }))
+    check('re-sending the unpostable file re-warns, not "already on the website"',
+      lastText().includes('20 MB') && !lastText().includes('already on the website'), lastText())
+    // Five minutes later KV simply forgets the note; every surface shrugs.
+    await env.VIDEOS.delete(bigKey)
+    check('after the expiry the public feed is untouched', (await feedOf(env)).length === 1)
+    sentMessages = []
+    await webhook(env, textMsg(111, '/videos'))
+    check('after the expiry /videos is untouched', lastText().includes('1. My Clip') && !lastText().includes('2.'), lastText().slice(0, 160))
+    // A row saved by an older deploy (indexed, permanent) is swept by the
+    // next dashboard open, record and index entry both.
+    const legacy = { id: 'tg-legacy', kind: 'telegram', title: 'Old big file', category: 'POV', tags: [], tooLarge: true, fileSize: 40 * 1048576, createdAt: 1 }
+    await env.VIDEOS.put('v:tg-legacy', JSON.stringify(legacy))
+    await env.VIDEOS.put('idx', JSON.stringify(['tg-legacy', ...JSON.parse(env.VIDEOS.map.get('idx'))]))
+    const adminRes = await call({ ...env, ADMIN_TOKEN: 'admin-secret' }, 'https://worker.test/api/admin/videos', {
+      headers: { Authorization: 'Bearer admin-secret' },
+    })
+    const adminBody = await adminRes.json()
+    check('dashboard opens clean and sweeps the legacy oversize row',
+      adminRes.status === 200 && adminBody.videos.length === 1 && adminBody.videos[0].title === 'My Clip',
+      JSON.stringify(adminBody).slice(0, 200))
+    check('the swept row is gone from KV and from the index',
+      !(await env.VIDEOS.get('v:tg-legacy')) && !JSON.parse(env.VIDEOS.map.get('idx')).includes('tg-legacy'))
+  }
 
   console.log('— streaming')
   const id = (await feedOf(env))[0].id
