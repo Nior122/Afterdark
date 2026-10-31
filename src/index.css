@@ -170,3 +170,15 @@ select:focus {
     background-clip: border-box;
   }
 }
+
+/* Anti-capture: printing (or print-to-PDF) a video page must never carry a
+   playable frame — the player area prints as solid black. */
+@media print {
+  [data-capture-guard] video,
+  [data-capture-guard] iframe {
+    visibility: hidden;
+  }
+  [data-capture-guard] {
+    background: #000 !important;
+  }
+}

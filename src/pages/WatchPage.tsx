@@ -4,9 +4,7 @@ import {
   Bell,
   Bookmark,
   Check,
-  Copy,
   ExternalLink,
-  Link2,
   Play,
   Share2,
   ThumbsDown,
@@ -19,27 +17,13 @@ import TelegramPlayer from '../components/TelegramPlayer'
 import TelegramCta from '../components/TelegramCta'
 import NotFoundPage from './NotFoundPage'
 import { channelPath, type Ad } from '../data/seed'
+import { useCaptureShield, videoGuardProps } from '../lib/anticapture'
 import { avatarFallbackFor } from '../lib/avatars'
 import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { usePageTitle } from '../lib/hooks'
 import { useStore } from '../lib/store'
 import { reportVideoView } from '../lib/views'
-import { FEED_ORIGIN } from '../lib/settings'
 import { formatCount, resolveSource } from '../lib/video'
-
-/**
- * The Worker's own stream endpoint is infrastructure, not content: showing it
- * under the player would put the owner's Worker URL on every bot-uploaded
- * video page. The source chip is only for genuinely external sources.
- */
-function isOwnFeedUrl(url?: string): boolean {
-  if (!url || !FEED_ORIGIN) return false
-  try {
-    return new URL(url).host === new URL(FEED_ORIGIN).host
-  } catch {
-    return false
-  }
-}
 
 function hashString(value: string) {
   let hash = 0
@@ -110,6 +94,9 @@ export default function WatchPage() {
   const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [autoplay, setAutoplay] = useState(true)
+  // Player stays covered while the window is unfocused or the tab is hidden
+  // (see lib/anticapture) — screenshots and app-switcher previews see black.
+  const shielded = useCaptureShield()
 
   const related = useMemo(() => {
     if (!video) return []
@@ -160,8 +147,9 @@ export default function WatchPage() {
     <div className="flex flex-col gap-8 pt-4 rail:flex-row rail:gap-6">
       <div className="min-w-0 flex-1">
         <div
+          data-capture-guard=""
           className={[
-            'relative w-full overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.5)]',
+            'relative w-full select-none overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.5)]',
             source.kind === 'telegram' ? '' : 'aspect-video',
           ].join(' ')}
         >
@@ -205,6 +193,7 @@ export default function WatchPage() {
               controls
               autoPlay
               playsInline
+              {...videoGuardProps}
               className="absolute inset-0 h-full w-full bg-black"
             />
           )}
@@ -249,6 +238,14 @@ export default function WatchPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          {shielded && (
+            <div
+              aria-hidden="true"
+              data-testid="capture-shield"
+              className="absolute inset-0 z-30 bg-black"
+            />
           )}
         </div>
 
@@ -389,20 +386,6 @@ export default function WatchPage() {
                   {tag}
                 </Link>
               ))}
-            </div>
-          )}
-
-          {video.videoUrl && !video.protectedEmbed && source.kind !== 'telegram' && !isOwnFeedUrl(video.videoUrl) && (
-            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-              <Link2 size={14} className="text-brand-600" />
-              <span className="max-w-full truncate">{video.videoUrl}</span>
-              <button
-                type="button"
-                onClick={() => void copyLink()}
-                className="inline-flex items-center gap-1 font-semibold text-brand-700 hover:underline"
-              >
-                <Copy size={13} /> Copy page link
-              </button>
             </div>
           )}
 

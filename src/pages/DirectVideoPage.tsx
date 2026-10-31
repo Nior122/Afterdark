@@ -4,6 +4,7 @@ import AdSlot, { GlobalAdScript } from '../components/AdSlot'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
 import TelegramCta from '../components/TelegramCta'
+import { useCaptureShield, videoGuardProps } from '../lib/anticapture'
 import { applyVideoMeta } from '../lib/meta'
 import { absoluteUrl } from '../lib/site'
 import { useStore } from '../lib/store'
@@ -23,6 +24,8 @@ export default function DirectVideoPage() {
   const { id = '' } = useParams()
   const { getVideo, ready } = useStore()
   const video = getVideo(id)
+  // Same shield as the site player: unfocused window or hidden tab shows black.
+  const shielded = useCaptureShield()
 
   useEffect(() => {
     if (video) applyVideoMeta(video)
@@ -51,8 +54,9 @@ export default function DirectVideoPage() {
   return (
     <main className="mx-auto w-full max-w-[1100px] px-3 py-5 sm:px-6 sm:py-10">
       <div
+        data-capture-guard=""
         className={[
-          'relative w-full overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.55)]',
+          'relative w-full select-none overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.55)]',
           isTelegram ? '' : 'aspect-video',
         ].join(' ')}
       >
@@ -107,6 +111,7 @@ export default function DirectVideoPage() {
             controls
             playsInline
             preload="metadata"
+            {...videoGuardProps}
             className="absolute inset-0 h-full w-full bg-black object-contain"
           />
         )}
@@ -115,6 +120,14 @@ export default function DirectVideoPage() {
           <div className="absolute inset-0">
             <img src={poster} alt="" className="h-full w-full object-cover opacity-70" />
           </div>
+        )}
+
+        {shielded && (
+          <div
+            aria-hidden="true"
+            data-testid="capture-shield"
+            className="absolute inset-0 z-30 bg-black"
+          />
         )}
       </div>
 

@@ -265,7 +265,13 @@ async function handleFeed(env, origin) {
         // its derived placeholder while this is 0, so freshly published
         // videos never look dead.
         views: viewsById.get(v.id) || 0,
-        sourceUrl: isLink ? v.sourceUrl : null,
+        // Raw file links are never published to visitors: `.mp4`-kind records
+        // play through the Worker proxy below (the site needs no origin URL at
+        // all), so the public feed carries nothing a scraper could take to the
+        // source CDN. The true URL lives only in the Worker's KV records and
+        // the admin API — the owner's pages. Embeds and page links keep their
+        // URLs because the external player itself is what plays them.
+        sourceUrl: isLink && v.sourceKind !== 'file' ? v.sourceUrl : null,
         // Scraped direct files stream through the same proxy as Telegram
         // uploads: blogs with hotlink protection 403 a visitor's <video>
         // request (or choke on mixed content), but accept the Worker's

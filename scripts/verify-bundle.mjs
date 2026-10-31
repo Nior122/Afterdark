@@ -195,6 +195,33 @@ const scenarios = [
     },
   },
   {
+    name: 'guard: the watch page plays the file but never prints its URL',
+    path: '/v/tg-canary/',
+    accepted: true,
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'direct', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        // A feed shaped like an OLD Worker's — raw file URL present. The built
+        // page must still never surface it as text.
+        return Promise.resolve(new Response(JSON.stringify({ videos: [{
+          id: 'tg-canary', title: 'Canary Clip', category: 'Homemade',
+          sourceUrl: 'https://leakcanary.test/secret.mp4', createdAt: Date.parse('2026-10-05T00:00:00Z'),
+        }] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    expect: (text) => /Canary Clip/.test(text) && !text.includes('leakcanary.test'),
+    probes: (window) => {
+      const v = window.document.querySelector('[data-capture-guard] video')
+      return [[
+        'guard: built player disables native download and PiP',
+        Boolean(v && (v.getAttribute('controlslist') || '').includes('nodownload') && v.hasAttribute('disablepictureinpicture')),
+      ]]
+    },
+  },
+  {
     name: 'direct mode hides the catalogue',
     path: '/',
     fetch: okWorker('direct'),
