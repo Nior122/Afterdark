@@ -4,6 +4,8 @@ import type { Ad, Video } from '../data/seed'
 import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { channelPath } from '../data/seed'
 import { avatarFallbackFor } from '../lib/avatars'
+import { isShortVideo } from '../lib/video'
+import ShortBadge from './ShortBadge'
 import KebabMenu from './KebabMenu'
 
 type FeedItem = Video | Ad
@@ -50,6 +52,7 @@ export default function VideoRow({ video, description, compact = false }: VideoR
         <span className="absolute bottom-2 right-2 rounded-[4px] bg-black/80 px-1.5 py-[2px] text-[11px] font-semibold leading-none text-white">
           {video.duration}
         </span>
+        {isShortVideo(video) && <ShortBadge />}
       </Link>
 
       <div className={`min-w-0 flex-1 ${compact ? 'py-0' : 'py-0.5'}`}>

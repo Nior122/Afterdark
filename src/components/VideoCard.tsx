@@ -4,6 +4,8 @@ import type { Ad, Video } from '../data/seed'
 import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { channelPath } from '../data/seed'
 import { avatarFallbackFor } from '../lib/avatars'
+import { isShortVideo } from '../lib/video'
+import ShortBadge from './ShortBadge'
 import { useStore } from '../lib/store'
 import KebabMenu from './KebabMenu'
 
@@ -56,6 +58,8 @@ export default function VideoCard({ video }: { video: FeedItem }) {
         <span className="absolute bottom-2 right-2 rounded-[5px] bg-black/80 px-1.5 py-[3px] text-[11px] font-semibold leading-none text-white">
           {video.duration}
         </span>
+
+        {isShortVideo(video) && <ShortBadge />}
 
         {isOwn && (
           <span className="absolute right-2 top-2 rounded-[4px] bg-white/90 px-1.5 py-[3px] text-[10.5px] font-bold uppercase tracking-wide text-brand-700">

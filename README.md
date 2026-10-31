@@ -81,7 +81,7 @@ The site ships with a runtime switch, stored in the Worker's KV so it needs no r
 
 | Mode | What visitors get |
 | --- | --- |
-| `public` (default) | The full catalogue: home feed, categories, search, related videos. The home feed splits itself by length: clips **under 60 seconds** form a **Shorts** wall (uniform 9:16 grid tiles) at the top, and the longer videos — plus anything whose duration is unknown — list under **Latest videos** beneath it |
+| `public` (default) | The full catalogue: home feed, categories, search, related videos. The home feed splits itself by length: clips **under 60 seconds** form a **Shorts** wall (uniform 9:16 grid tiles) at the top, and the longer videos — plus anything whose duration is unknown — list under **Latest videos** beneath it. Every sub-minute clip also wears a small red **Short** badge at its thumbnail's bottom-left corner wherever it is listed (wall, category grids, search rows, related videos) |
 | `direct` | Link-only: no home page, no menu, no related videos, no links between videos. Each video opens **only** from its own URL `/v/<id>/` |
 
 **Home-page redirect.** In `direct` mode the owner can point every non-video URL at an
