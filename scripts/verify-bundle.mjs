@@ -159,6 +159,23 @@ const rotationFeed_ = Array.from({ length: 8 }, (_, i) => ({
   thumbUrl: `https://worker.test/api/videos/tg-rot-${i}/thumb.jpg`,
 }))
 
+// One feed shaped for the Shorts wall: a 42-second clip and a 10-minute one.
+const shortsFeed_ = [
+  { id: 'tg-tiny', title: 'Tiny Short', category: 'Homemade', durationSec: 42, width: 720, height: 1280,
+    createdAt: Date.parse('2026-10-05T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-tiny/stream.mp4' },
+  { id: 'tg-wide', title: 'Wide Feature', category: 'Homemade', durationSec: 600, width: 1280, height: 720,
+    createdAt: Date.parse('2026-10-04T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-wide/stream.mp4' },
+]
+const shortsWorker_ = (url) => {
+  if (url.endsWith('/api/settings')) {
+    return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+  }
+  if (url.endsWith('/api/videos')) {
+    return Promise.resolve(new Response(JSON.stringify({ videos: shortsFeed_ }), { status: 200 }))
+  }
+  return Promise.resolve(new Response('{}', { status: 200 }))
+}
+
 const scenarios = [
   {
     name: 'first visit (no localStorage) shows the age gate',
@@ -360,32 +377,40 @@ const scenarios = [
   {
     name: 'shorts: sub-minute clips get a dedicated grid on the home page',
     path: '/',
-    fetch: onlyWorker((url) => {
-      if (url.endsWith('/api/settings')) {
-        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
-      }
-      if (url.endsWith('/api/videos')) {
-        return Promise.resolve(new Response(JSON.stringify({ videos: [
-          { id: 'tg-tiny', title: 'Tiny Short', category: 'Homemade', durationSec: 42, width: 720, height: 1280,
-            createdAt: Date.parse('2026-10-05T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-tiny/stream.mp4' },
-          { id: 'tg-wide', title: 'Wide Feature', category: 'Homemade', durationSec: 600, width: 1280, height: 720,
-            createdAt: Date.parse('2026-10-04T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-wide/stream.mp4' },
-        ] }), { status: 200 }))
-      }
-      return Promise.resolve(new Response('{}', { status: 200 }))
-    }),
+    fetch: onlyWorker(shortsWorker_),
     accepted: true,
     expect: (text) => /Tiny Short/.test(text) && /Wide Feature/.test(text),
     probes: (w) => {
       const sections = [...w.document.querySelectorAll('section')]
       const shorts = sections.find((s) => s.querySelector('h2')?.textContent === 'Shorts')
       const latest = sections.find((s) => s.querySelector('h2')?.textContent === 'Latest videos')
+      const badgeIn = (root) => Array.from(root?.querySelectorAll('.bg-red-600') || []).find((el) => /short/i.test(el.textContent || ''))
       return [
         ['shorts: the 42-second clip lands in the Shorts wall', Boolean(shorts) && shorts.textContent.includes('Tiny Short')],
         ['shorts: the wall frames tiles upright in a grid',
           Boolean(shorts?.querySelector('.grid')) && /aspect-\[9\/16\]/.test(shorts.innerHTML)],
         ['shorts: the 10-minute clip stays in Latest videos, listed under the wall',
           Boolean(latest) && latest.textContent.includes('Wide Feature') && !latest.textContent.includes('Tiny Short')],
+        ['shorts: the tile wears a red Short badge in its corner', Boolean(badgeIn(shorts?.querySelector('a[href*="/watch/"]')))],
+        ['shorts: long-video cards carry no badge', !badgeIn(latest)],
+      ]
+    },
+  },
+  {
+    name: 'shorts badge: cards outside the wall flag sub-minute clips too',
+    // The Homemade browse page lists every matching video unconditionally
+    // (no rotation slice), so both fixtures are guaranteed on it.
+    path: '#/browse/Homemade',
+    fetch: onlyWorker(shortsWorker_),
+    accepted: true,
+    expect: (text) => /Tiny Short/.test(text) && /Wide Feature/.test(text),
+    probes: (w) => {
+      const tiny = w.document.querySelector('a[href*="/watch/tg-tiny"]')
+      const wide = w.document.querySelector('a[href*="/watch/tg-wide"]')
+      return [
+        ['browse: the sub-minute card carries the red Short badge',
+          Boolean(tiny?.querySelector('.bg-red-600'))],
+        ['browse: the 10-minute card does not', Boolean(wide) && !wide.querySelector('.bg-red-600')],
       ]
     },
   },

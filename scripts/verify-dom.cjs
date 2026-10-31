@@ -150,6 +150,12 @@ async function run() {
   const shortTile = shortsSection?.querySelector('a[href*="/watch/"]')
   check('shorts: a tile links to the usual watch page',
     Boolean(shortTile && shortTile.getAttribute('href')?.includes('v-telegram-twerking-aunty')))
+  check('shorts: every wall tile wears the red Short badge',
+    Boolean(shortsSection) && shortsSection.querySelectorAll('a[href*="/watch/"]').length > 0 &&
+      [...shortsSection.querySelectorAll('a[href*="/watch/"]')].every((a) => a.querySelector('.bg-red-600')) &&
+      /short/i.test(shortsSection.querySelector('.bg-red-600')?.textContent || ''),
+    shortsSection?.innerHTML.slice(0, 240))
+  check('shorts: the long-video list carries no badge', Boolean(latestSection) && !latestSection.querySelector('.bg-red-600'))
 
   // ---- the two-minute catalogue rotation (src/lib/reshuffle.ts) ----
   const app = require(bundle)

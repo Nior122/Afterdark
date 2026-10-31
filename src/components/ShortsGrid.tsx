@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Ad, Video } from '../data/seed'
+import { isShortVideo } from '../lib/video'
+import ShortBadge from './ShortBadge'
 
 /**
  * The Shorts wall on the home page. Deliberately NOT the VideoGrid masonry:
@@ -25,6 +27,7 @@ export default function ShortsGrid({ videos }: { videos: (Video | Ad)[] }) {
             <span className="absolute bottom-1.5 right-1.5 rounded-[5px] bg-black/80 px-1.5 py-[3px] text-[11px] font-semibold leading-none text-white">
               {video.duration}
             </span>
+            {isShortVideo(video) && <ShortBadge inset="bottom-1.5 left-1.5" />}
           </span>
           <span className="mt-1.5 line-clamp-2 block text-[13px] font-semibold leading-snug text-ink">
             {video.title}
