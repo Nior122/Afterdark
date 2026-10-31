@@ -125,6 +125,27 @@ const CATEGORIES = [
 ]
 const DEFAULT_CATEGORY = 'Homemade'
 const BOT_MAX_FILE_BYTES = 20 * 1024 * 1024 // Telegram Bot API getFile limit
+
+/**
+ * A video the bot can never stream (over Telegram's 20 MB bot limit) is not
+ * content, it is a note about a rejected upload. writeVideoRecord is the one
+ * writer every record goes through: while a record carries the tooLarge flag
+ * its KV copy expires five minutes after the last write — long enough to
+ * re-read the warning and re-send a smaller version, never long enough for
+ * unplayable rows to pile up. Such records are kept out of the index (so no
+ * feed, dashboard list or /videos page ever shows them), and reconcileIndex
+ * sweeps any saved by older deploys.
+ */
+const OVERSIZE_KEEP_SECONDS = 300
+
+/** The one writer for catalogue records: routes the oversize expiry through. */
+async function writeVideoRecord(env, id, record) {
+  await env.VIDEOS.put(
+    `v:${id}`,
+    JSON.stringify(record),
+    record && record.tooLarge ? { expirationTtl: OVERSIZE_KEEP_SECONDS } : undefined,
+  )
+}
 const MAX_INDEX = 500
 const FILE_PATH_TTL_MS = 50 * 60 * 1000 // Telegram file paths last >= 1 hour
 
@@ -972,7 +993,7 @@ async function handleAdmin(request, env, url) {
       }
       video.category = body.category
       video.updatedAt = Date.now()
-      await env.VIDEOS.put(`v:${id}`, JSON.stringify(video))
+      await writeVideoRecord(env, id, video)
       updated.push(id)
     }
     if (updated.length) await markCatalogChanged(env)
@@ -1013,7 +1034,7 @@ async function handleAdmin(request, env, url) {
       existing.hashtagAgent = { ...(existing.hashtagAgent || {}), source: 'manual', at: Date.now() }
     }
     existing.updatedAt = Date.now()
-    await env.VIDEOS.put(`v:${id}`, JSON.stringify(existing))
+    await writeVideoRecord(env, id, existing)
     await markCatalogChanged(env)
     return json({ ok: true, video: { id, ...existing } }, 200, cors)
   }
@@ -1561,7 +1582,9 @@ async function processMessage(msg, env) {
     if (v.tooLarge) {
       return send(env, chatId,
         `⚠️ "${v.title}" is ${(v.fileSize / 1048576).toFixed(1)} MB. Telegram bots can only stream files up to 20 MB, ` +
-        'so I saved it but cannot put it on the website. Send a compressed/smaller version, or post it in a public channel and share the t.me link instead.')
+        'so it cannot go on the website. I keep no copy of it: this note disappears on its own 5 minutes after it arrived, ' +
+        'nothing for you to clean up. To still put it up: send a compressed/smaller version, or post it in a public channel ' +
+        'and share the t.me link with me instead.')
     }
     return send(env, chatId,
       `✅ Posted to the website!\n"${v.title}" · ${v.category} · ${formatDuration(v.durationSec)}\n` +
@@ -1627,7 +1650,16 @@ function extractVideo(msg) {
 async function ingest(env, video, caption, source) {
   const id = `tg-${await shortHash(video.fileUniqueId)}`
   const existing = await readVideo(env, id)
-  if (existing) return { duplicate: true, record: existing }
+  if (existing) {
+    if (existing.tooLarge) {
+      // Re-sending a copy that can never stream re-prints the warning with
+      // its remedy — not a false "already on the website". The re-put only
+      // re-arms the five-minute expiry on the unchanged bytes.
+      await writeVideoRecord(env, existing.id, existing)
+      return { duplicate: false, rewarn: true, record: existing }
+    }
+    return { duplicate: true, record: existing }
+  }
 
   const parsed = parseCaption(caption, video.fileName)
   const base = {
@@ -1659,9 +1691,14 @@ async function ingest(env, video, caption, source) {
     captionAgent: agent.captionMeta,
     hashtagAgent: agent.hashtagMeta,
   }
-  await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
-  await pushIndex(env, id)
-  await markCatalogChanged(env)
+  await writeVideoRecord(env, id, record)
+  // An unpostable copy is a note, not content: keep it out of the index so
+  // it reaches no list (feed, dashboard, /videos) and its 5-minute expiry
+  // leaves nothing dangling; skip the rebuild cue for the same reason.
+  if (!record.tooLarge) {
+    await pushIndex(env, id)
+    await markCatalogChanged(env)
+  }
   return { duplicate: false, record }
 }
 
@@ -3416,7 +3453,7 @@ async function createDraftsFromUrl(env, rawUrl) {
         stale.sourceKind = item.sourceKind
         fillRecordFromItem(stale, item)
         stale.updatedAt = Date.now()
-        await env.VIDEOS.put(`v:${stale.id}`, JSON.stringify(stale))
+        await writeVideoRecord(env, stale.id, stale)
         stored.delete(pageKey)
         repaired += 1
         // A pending draft of the same broken page link is now obsolete.
@@ -3432,7 +3469,7 @@ async function createDraftsFromUrl(env, rawUrl) {
       const record = stored.get(key)
       if (record && fillRecordFromItem(record, item)) {
         record.updatedAt = Date.now()
-        await env.VIDEOS.put(`v:${record.id}`, JSON.stringify(record))
+        await writeVideoRecord(env, record.id, record)
         backfilled += 1
       }
       duplicates += 1
@@ -3691,7 +3728,7 @@ async function publishDraft(env, draft) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
-  await env.VIDEOS.put(`v:${id}`, JSON.stringify(record))
+  await writeVideoRecord(env, id, record)
   await pushIndex(env, id)
   await markCatalogChanged(env)
   return record
@@ -3880,7 +3917,7 @@ async function applyRename(env, chatId, videoId, title) {
   if (!clean) return send(env, chatId, 'The title cannot be empty.')
   video.title = clean
   video.updatedAt = Date.now()
-  await env.VIDEOS.put(`v:${video.id}`, JSON.stringify(video))
+  await writeVideoRecord(env, video.id, video)
   return send(env, chatId, `✅ Renamed to:\n"${clean}"\n\nThe website picks this up within a minute.`)
 }
 
@@ -3941,7 +3978,7 @@ async function setVideoCategory(env, chatId, videoId, index, messageId) {
   if (!video || !category) return send(env, chatId, 'No such video.')
   video.category = category
   video.updatedAt = Date.now()
-  await env.VIDEOS.put(`v:${video.id}`, JSON.stringify(video))
+  await writeVideoRecord(env, video.id, video)
   if (messageId) await editMessage(env, chatId, messageId, `🏷 Category set to ${category}.`)
   return send(env, chatId, `✅ "${truncate(video.title, 80)}" is now in ${category}.`)
 }
@@ -4056,14 +4093,25 @@ async function reconcileIndex(env) {
     const ids = await readIndex(env)
     const living = []
     for (const id of ids) {
-      if (await readVideo(env, id)) living.push(id)
+      const record = await readVideo(env, id)
+      // A copy too large for the bot to ever stream is a note, not content:
+      // drop it from the index and delete it — records saved before the
+      // 5-minute auto-expiry existed get swept here on the next dashboard open.
+      if (record?.tooLarge) {
+        await env.VIDEOS.delete(`v:${id}`)
+        continue
+      }
+      if (record) living.push(id)
     }
     const seen = new Set(living)
     const listed = await env.VIDEOS.list({ prefix: 'v:', limit: 1000 })
     for (const key of listed?.keys || []) {
       const id = String(key?.name || '').replace(/^v:/, '')
       if (!id || seen.has(id) || !/^[A-Za-z0-9_-]+$/.test(id)) continue
-      if (await readVideo(env, id)) {
+      const record = await readVideo(env, id)
+      // A fresh oversize note (inside its 5-minute window) is deliberately
+      // unindexed — healing must not pull it back into the catalogue.
+      if (record && !record.tooLarge) {
         living.unshift(id)
         seen.add(id)
         added += 1
