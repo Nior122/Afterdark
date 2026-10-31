@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import Header from './components/Header'
+import BottomNav from './components/BottomNav'
 import Sidebar from './components/Sidebar'
 import CreateModal from './components/CreateModal'
 import HomePage from './pages/HomePage'
 import BrowsePage from './pages/BrowsePage'
 import ChannelPage from './pages/ChannelPage'
 import ExplorePage from './pages/ExplorePage'
+import ShortsPage from './pages/ShortsPage'
 import TrendingPage from './pages/TrendingPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import LibraryPage from './pages/LibraryPage'
@@ -48,12 +50,13 @@ export default function App() {
         <div className="px-4 pt-3 sm:px-5 xl:px-6">
           <AdSlot slot="header" />
         </div>
-        <main className="px-4 pb-20 sm:px-5 xl:px-6">
+        <main className="px-4 pb-24 sm:px-5 xl:px-6">
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/browse/:category" element={<BrowsePage />} />
             <Route path="/channel/:channelId" element={<ChannelPage />} />
             <Route path="/explore" element={<ExplorePage />} />
+            <Route path="/shorts" element={<ShortsPage />} />
             <Route path="/trending" element={<TrendingPage />} />
             <Route path="/subscriptions" element={<SubscriptionsPage />} />
             <Route path="/library" element={<LibraryPage />} />
@@ -68,10 +71,11 @@ export default function App() {
         </main>
       </div>
 
-      <footer className="border-t border-line px-4 py-6 sm:px-5 xl:px-6 lg:pl-[192px]">
+      <footer className="border-t border-line px-4 py-6 pb-20 sm:px-5 xl:px-6 lg:pl-[192px] lg:pb-6">
         <AdSlot slot="footer" />
       </footer>
 
+      <BottomNav />
       <CreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   )

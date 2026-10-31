@@ -133,7 +133,11 @@ Forward/send a video to the bot — it is published immediately, exactly as befo
 - First line of the caption = **title** (links are stripped from it; line 1 wins,
   hashtags never end up in the title even when its line has none)
 - `#Hashtags` one matching a site category set the **category** —
-  `#POV`, `#MILF`, `#Big_Ass`, `#4K_Ultra_HD`. No match → `Homemade`.
+  `#POV`, `#MILF`, `#Big_Ass`, `#4K_Ultra_HD`. No category hashtag →
+  **automatic placement**: the video lands in whichever category currently
+  holds the fewest videos, so untagged posts spread themselves evenly over
+  the browse rows instead of piling into one fallback. The reply tells you
+  where it landed; `/category` (bot) or the dashboard moves it anytime.
 - With the Workers AI binding the **description and hashtags are written per
   video** by the caption agent; extra caption text and hashtags are context for
   it, not published verbatim. No binding (or `CAPTION_AGENT=off`) → a
@@ -307,7 +311,8 @@ to appear on the site automatically:
    is forgiving: `2188686361`, `-1002188686361` and `-100 2188686361` all
    match the same channel. Comma-separate for several channels.
 4. New video posts in that channel now publish automatically — caption line 1
-   becomes the title, hashtags set the category, the AI agent (when enabled)
+   becomes the title, hashtags set the category (and without one the post is
+   placed in the least-filled category), the AI agent (when enabled)
    writes the description. Only posts containing a **video** are ingested
    (text/photo/link posts are left alone), and files over Telegram's 20 MB
    bot limit can't be pulled — post a public `t.me` link for those instead.

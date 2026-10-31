@@ -52,7 +52,7 @@ export default function HomePage() {
       )}
 
       {shorts.length > 0 && (
-        <Section title="Shorts">
+        <Section title="Shorts" viewAllTo="/shorts">
           <ShortsGrid videos={shorts} />
         </Section>
       )}

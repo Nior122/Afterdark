@@ -581,6 +581,37 @@ async function main() {
       !(await env.VIDEOS.get('v:tg-legacy')) && !JSON.parse(env.VIDEOS.map.get('idx')).includes('tg-legacy'))
   }
 
+  console.log('— category spread: untagged posts land in the least-filled category')
+  {
+    sentMessages = []
+    const senv = { ...env, VIDEOS: new MockKV() }
+    // videoMsg's `over` reaches inside `video` only — build the message here
+    // so the caption (and with it the hashtag intent) is the real variable.
+    const post = (uniq, caption) => msg(999, {
+      caption,
+      video: { file_id: `vid-${uniq}`, file_unique_id: uniq, file_name: 'clip.mp4',
+        duration: 74, width: 720, height: 1280, file_size: 5 * 1048576, thumbnail: { file_id: `thumb-${uniq}` } },
+    })
+    await webhook(senv, textMsg(999, '/start'))
+    await webhook(senv, post('spA', 'beach walk'))
+    let sfeed = await feedOf(senv)
+    check('untagged first post opens the first category (POV)', lastText().includes('· POV ·') && sfeed[0]?.title === 'beach walk' && sfeed[0]?.category === 'POV', `${lastText()} / ${sfeed[0]?.category}`)
+    await webhook(senv, post('spB', 'hotel key'))
+    sfeed = await feedOf(senv)
+    const spreadB = sfeed.find((x) => x.title === 'hotel key')
+    check('untagged second post spreads to the next empty (Amateur)', lastText().includes('· Amateur ·') && spreadB?.category === 'Amateur', lastText())
+    check('the tag list follows the assigned category',
+      spreadB?.tags?.includes('Amateur') && !spreadB?.tags?.includes('Homemade'), JSON.stringify(spreadB?.tags))
+    await webhook(senv, post('spC', 'twerk session #Latina'))
+    sfeed = await feedOf(senv)
+    check('an explicit hashtag still wins over the spread',
+      sfeed.find((x) => x.title === 'twerk session')?.category === 'Latina' && lastText().includes('· Latina ·'), lastText())
+    await webhook(senv, post('spD', 'rooftop'))
+    sfeed = await feedOf(senv)
+    check('the fourth untagged post takes the next least-filled (MILF)',
+      sfeed.find((x) => x.title === 'rooftop')?.category === 'MILF', lastText())
+  }
+
   console.log('— streaming')
   const id = (await feedOf(env))[0].id
   const ranged = await call(env, `https://worker.test/api/videos/${id}/stream.mp4`, { headers: { Range: 'bytes=2-5' } })
