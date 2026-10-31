@@ -157,6 +157,24 @@ async function run() {
     shortsSection?.innerHTML.slice(0, 240))
   check('shorts: the long-video list carries no badge', Boolean(latestSection) && !latestSection.querySelector('.bg-red-600'))
 
+  // ---- bottom tab bar + the dedicated Shorts page ----
+  const navAnchors = [...dom.window.document.querySelectorAll('nav[aria-label="Primary"] a')]
+  check('bottom nav: Home · Categories · Shorts · Trending sit below the content',
+    navAnchors.length === 4 &&
+      ['Home', 'Categories', 'Shorts', 'Trending'].every((label, i) => navAnchors[i].textContent.trim() === label),
+    JSON.stringify(navAnchors.map((a) => a.textContent)))
+  check('bottom nav: hash-route hrefs and the home tab marked current',
+    (navAnchors[0]?.getAttribute('href') || '').endsWith('#/') &&
+      ['/explore', '/shorts', '/trending'].every((href) => navAnchors.some((a) => (a.getAttribute('href') || '').includes(href))) &&
+      navAnchors[0]?.getAttribute('aria-current') === 'page')
+  const domShorts = mountApp('/#/shorts', 'public')
+  await wait(700)
+  const shortsPageText = domShorts.window.document.body.textContent
+  check('shorts page: lists the sub-minute clip and nothing longer',
+    /Twerking Aunty/.test(shortsPageText) && !/Sunday Sex Show 55/.test(shortsPageText), shortsPageText.slice(0, 200))
+  check('shorts page: the wall tab knows it is current',
+    domShorts.window.document.querySelector('nav[aria-label="Primary"] a[href*="/shorts"]')?.getAttribute('aria-current') === 'page')
+
   // ---- the two-minute catalogue rotation (src/lib/reshuffle.ts) ----
   const app = require(bundle)
   const src = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']

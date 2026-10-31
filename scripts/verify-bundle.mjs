@@ -415,6 +415,33 @@ const scenarios = [
     },
   },
   {
+    name: 'bottom nav: the tab bar routes Home · Categories · Shorts · Trending',
+    path: '/',
+    fetch: onlyWorker(shortsWorker_),
+    accepted: true,
+    expect: (text) => /Home/.test(text) && /Categories/.test(text) && /Shorts/.test(text) && /Trending/.test(text),
+    probes: (w) => {
+      const tabs = [...w.document.querySelectorAll('nav[aria-label="Primary"] a')]
+      return [
+        ['nav: four tabs, hash-route hrefs, current page marked',
+          tabs.length === 4 && tabs.every((a) => (a.getAttribute('href') || '').includes('#/')) && tabs[0]?.getAttribute('aria-current') === 'page'],
+        ['nav: the Shorts tab points at the wall page',
+          tabs.some((a) => (a.getAttribute('href') || '').includes('/shorts'))],
+      ]
+    },
+  },
+  {
+    name: 'shorts page: the wall holds every sub-minute clip and nothing longer',
+    path: '#/shorts',
+    fetch: onlyWorker(shortsWorker_),
+    accepted: true,
+    expect: (text) => /Tiny Short/.test(text) && !/Wide Feature/.test(text),
+    probes: (w) => [
+      ['shorts page: upright grid tiles with the red badge',
+        /aspect-\[9\/16\]/.test(w.document.querySelector('main')?.innerHTML || '') && Boolean(w.document.querySelector('.bg-red-600'))],
+    ],
+  },
+  {
     name: 'portrait uploads keep their shape in the catalogue grid',
     // The home 'Latest videos' section is chronological ROWS by design (since
     // 'Show all latest videos in chronological order'); masonry lives on the

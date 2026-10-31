@@ -1662,6 +1662,19 @@ async function ingest(env, video, caption, source) {
   }
 
   const parsed = parseCaption(caption, video.fileName)
+  // Automatic placement: no #Category hashtag means the owner expressed no
+  // intent, so the post goes where the catalogue needs it — the least-filled
+  // category. An explicit hashtag still wins, and the tag list follows the
+  // assigned category rather than the old 'Homemade' fallback.
+  if (!parsed.categoryExplicit) {
+    const spread = await spreadCategory(env)
+    if (spread !== parsed.category) {
+      parsed.category = spread
+      parsed.tags = [
+        ...new Set([spread, ...parsed.tags.filter((t) => t.toLowerCase() !== DEFAULT_CATEGORY.toLowerCase())]),
+      ]
+    }
+  }
   const base = {
     id,
     kind: 'telegram',
@@ -1714,9 +1727,10 @@ function parseCaption(caption, fileName) {
   const firstLine = lines[0] || ''
   const ownerDescription = lines.slice(1).join(' ').trim().slice(0, 600)
   let category = DEFAULT_CATEGORY
+  let categoryExplicit = false
   for (const tag of hashtags) {
     const match = CATEGORIES.find((c) => c.toLowerCase() === tag.toLowerCase())
-    if (match) { category = match; break }
+    if (match) { category = match; categoryExplicit = true; break }
   }
   const userHashtags = [...new Set(hashtags.map((t) => titleCase(t))
     .filter((t) => t.toLowerCase() !== category.toLowerCase()))]
@@ -1731,9 +1745,37 @@ function parseCaption(caption, fileName) {
     title: firstLine || fromFile || 'Telegram video',
     ownerDescription,
     category,
+    categoryExplicit,
     tags: [...new Set([...tags, 'Telegram'])],
     userHashtags,
     hasUserHashtags: hashtags.length > 0,
+  }
+}
+
+/**
+ * Automatic category placement. A post without a category hashtag lands in
+ * the category that currently holds the FEWEST published videos, so a busy
+ * week spreads itself evenly over the browse rows instead of piling every
+ * untagged clip into the one fallback category. Ties go to the earlier entry
+ * of CATEGORIES, which makes a fresh empty catalogue fill POV, Amateur,
+ * MILF… in order — a natural rotation. It is a live count over the index
+ * (self-healing: deletes and re-categorisations need no bookkeeping), paid
+ * once per publish only.
+ */
+async function spreadCategory(env) {
+  try {
+    const ids = await readIndex(env)
+    const counts = new Map(CATEGORIES.map((c) => [c, 0]))
+    const records = await Promise.all(ids.map((id) => readVideo(env, id)))
+    for (const record of records) {
+      const c = record && record.category
+      if (c && counts.has(c)) counts.set(c, counts.get(c) + 1)
+    }
+    let best = CATEGORIES[0]
+    for (const c of CATEGORIES) if (counts.get(c) < counts.get(best)) best = c
+    return best
+  } catch {
+    return DEFAULT_CATEGORY
   }
 }
 
