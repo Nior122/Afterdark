@@ -168,7 +168,10 @@ Forward a video to a Telegram bot and it appears on the site for everyone — in
 from private chats/channels that the public embed cannot reach. A tiny Cloudflare Worker
 (`worker/worker.js`) receives the bot's updates, stores only Telegram file IDs in KV, publishes
 a JSON feed at `/api/videos` (each video carries its real `views` count), and proxies
-playback/thumbnails so the bot token never reaches the browser — the same proxy now also serves
+playback/thumbnails so the bot token never reaches the browser. Both public read paths are
+memoized per Worker instance for 60 s (a publish, delete or repair invalidates instantly, and
+`FEED_MEMO_MS` tunes it), so KV quota scales with how often the catalogue *changes*, not with
+page views — the same proxy now also serves
 scraped external `.mp4`s and posters, which is what makes hotlink-protecting blogs (the
 "broken link when I press play" case) play normally. The public feed hands out **only** the
 proxied URL for `.mp4` records — the source blog's raw link is never published to visitors (it

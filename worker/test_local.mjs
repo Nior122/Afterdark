@@ -486,7 +486,10 @@ const lastKeyboard = () => sentMessages.at(-1)?.reply_markup?.inline_keyboard ||
 const feedOf = async (env) => (await (await call(env, 'https://worker.test/api/videos')).json()).videos
 
 async function main() {
-  const env = { BOT_TOKEN: TOKEN, WEBHOOK_SECRET: SECRET, VIDEOS: new MockKV() }
+  // FEED_MEMO_MS=0 keeps the public-read memo off for this suite: several
+  // sections write KV directly and assert the feed instantly. (A dedicated
+  // section at the end exercises the memo itself on its own env.)
+  const env = { BOT_TOKEN: TOKEN, WEBHOOK_SECRET: SECRET, VIDEOS: new MockKV(), FEED_MEMO_MS: '0' }
 
   console.log('— basics')
   check('health ok', (await call(env, 'https://worker.test/health')).status === 200)
@@ -1732,6 +1735,39 @@ async function main() {
       const rawIdx = await env.VIDEOS.get('idx')
       await env.VIDEOS.put('idx', JSON.stringify(JSON.parse(rawIdx || '[]').filter((x) => x !== rec.id)))
     }
+  }
+
+  console.log('— KV quota: public reads memoize, mutations invalidate')
+  {
+    const menv = { BOT_TOKEN: TOKEN, WEBHOOK_SECRET: SECRET, VIDEOS: new MockKV() }
+    await webhook(menv, textMsg(111, '/start'))
+    await webhook(menv, videoMsg(111, 'memoA'))
+    const mget = menv.VIDEOS.get.bind(menv.VIDEOS)
+    let mreads = 0
+    menv.VIDEOS.get = async (...args) => { mreads += 1; return mget(...args) }
+    const r1 = await call(menv, 'https://worker.test/api/videos')
+    const feed1 = await r1.text()
+    const buildReads = mreads
+    check('memo: the first feed request pays the reads', buildReads > 0, String(buildReads))
+    mreads = 0
+    const r2 = await call(menv, 'https://worker.test/api/videos')
+    const feed2 = await r2.text()
+    check('memo: repeat page views cost zero KV reads and identical bytes',
+      mreads === 0 && feed1 === feed2 && r2.headers.get('x-feed-cache') === 'hit',
+      `${mreads} reads, ${feed1 === feed2 ? 'same' : 'different'}`)
+    const memoId = JSON.parse(feed1).videos[0].id
+    mreads = 0
+    await call(menv, `https://worker.test/api/videos/${memoId}/thumb.jpg`)
+    const thumbFirst = mreads
+    mreads = 0
+    await call(menv, `https://worker.test/api/videos/${memoId}/thumb.jpg`)
+    check('memo: proxied media reuses the cached record', thumbFirst === 1 && mreads === 0,
+      JSON.stringify({ first: thumbFirst, again: mreads }))
+    await webhook(menv, videoMsg(111, 'memoB')) // publish → markCatalogChanged → invalidate
+    mreads = 0
+    const feed3 = await (await call(menv, 'https://worker.test/api/videos')).json()
+    check('a publish invalidates the memo on the very next request',
+      mreads > 0 && feed3.videos.length === 2, JSON.stringify({ reads: mreads, n: feed3.videos.length }))
   }
 
   console.log('\n' + `${passed} passed, ${failed} failed`)
