@@ -105,7 +105,7 @@ async function run() {
   await wait(500)
   let text = dom.window.document.body.textContent
   check('direct mode: settings requested', requests.some((url) => url.endsWith('/api/settings')))
-  check('direct mode: catalogue hidden', !/Latest videos|Popular categories/i.test(text), text.slice(0, 120))
+  check('direct mode: catalogue hidden', !/Latest videos|Popular categories|\bShorts\b/i.test(text), text.slice(0, 120))
   check('direct mode: neutral message', /isn’t available|not available/i.test(text), text.slice(0, 160))
   check('direct mode: no links', dom.window.document.querySelectorAll('a').length === 0)
   check('direct mode: no video ids', !dom.window.document.body.innerHTML.includes('v-pov-tatum-christine'))
@@ -140,6 +140,16 @@ async function run() {
   check('latest: all catalogue videos shown', text.includes('Older feed video 9') && text.includes('Isabella Clark') && text.includes('Swimming Public Pool'))
   const latestSection = [...dom.window.document.querySelectorAll('section')].find((section) => section.querySelector('h2')?.textContent === 'Latest videos')
   check('latest: chronological grid reads across rows', Boolean(latestSection?.querySelector('.grid')))
+
+  // ---- shorts: sub-minute clips live in their own wall, not in the list ----
+  const shortsSection = [...dom.window.document.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Shorts')
+  check('shorts: the 0:54 clip renders under a Shorts heading',
+    Boolean(shortsSection) && /Twerking Aunty/.test(shortsSection.textContent || ''))
+  check('shorts: the wall is a uniform grid and the list does not repeat it',
+    Boolean(shortsSection?.querySelector('.grid')) && Boolean(latestSection) && !latestSection.textContent.includes('Twerking Aunty'))
+  const shortTile = shortsSection?.querySelector('a[href*="/watch/"]')
+  check('shorts: a tile links to the usual watch page',
+    Boolean(shortTile && shortTile.getAttribute('href')?.includes('v-telegram-twerking-aunty')))
 
   // ---- the two-minute catalogue rotation (src/lib/reshuffle.ts) ----
   const app = require(bundle)

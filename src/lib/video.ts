@@ -204,6 +204,35 @@ export function timeAgo(timestamp: number): string {
   return 'just now'
 }
 
+/**
+ * Total seconds of a listing's display duration ('0:54', '12:01', '1:02:03').
+ * Returns null for placeholders ('—') and for '0:00' — the shape the feed
+ * shows when Telegram reported no length — so an unknown duration never
+ * poses as a Short.
+ */
+export function durationToSeconds(display?: string): number | null {
+  const value = String(display || '').trim()
+  const parts = value.split(':')
+  if (!parts.length || parts.length > 3 || parts.some((p) => !/^\d{1,3}$/.test(p))) return null
+  const [a, b, c] = parts.map(Number)
+  const seconds = parts.length === 1 ? a : parts.length === 2 ? a * 60 + (b ?? 0) : a * 3600 + b * 60 + (c ?? 0)
+  if (parts.length === 2 && b > 59) return null
+  if (parts.length === 3 && (b > 59 || c > 59)) return null
+  return seconds > 0 ? seconds : null
+}
+
+/**
+ * The home page frames sub-minute clips as Shorts. Anything we cannot prove
+ * is short (unknown duration, missing metadata) stays in the long-video list,
+ * which is where a misread '0:00' belongs anyway.
+ */
+export const SHORT_MAX_SECONDS = 60
+
+export function isShortVideo(video: { duration?: string }): boolean {
+  const seconds = durationToSeconds(video.duration)
+  return seconds !== null && seconds < SHORT_MAX_SECONDS
+}
+
 export function parseDuration(input: string): string | null {
   const trimmed = input.trim()
   if (!trimmed) return null

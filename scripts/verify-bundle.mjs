@@ -358,6 +358,38 @@ const scenarios = [
     probes: (w) => [['no CTA anchor anywhere on the grid', !w.document.querySelector('a[data-cta]')]],
   },
   {
+    name: 'shorts: sub-minute clips get a dedicated grid on the home page',
+    path: '/',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [
+          { id: 'tg-tiny', title: 'Tiny Short', category: 'Homemade', durationSec: 42, width: 720, height: 1280,
+            createdAt: Date.parse('2026-10-05T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-tiny/stream.mp4' },
+          { id: 'tg-wide', title: 'Wide Feature', category: 'Homemade', durationSec: 600, width: 1280, height: 720,
+            createdAt: Date.parse('2026-10-04T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-wide/stream.mp4' },
+        ] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Tiny Short/.test(text) && /Wide Feature/.test(text),
+    probes: (w) => {
+      const sections = [...w.document.querySelectorAll('section')]
+      const shorts = sections.find((s) => s.querySelector('h2')?.textContent === 'Shorts')
+      const latest = sections.find((s) => s.querySelector('h2')?.textContent === 'Latest videos')
+      return [
+        ['shorts: the 42-second clip lands in the Shorts wall', Boolean(shorts) && shorts.textContent.includes('Tiny Short')],
+        ['shorts: the wall frames tiles upright in a grid',
+          Boolean(shorts?.querySelector('.grid')) && /aspect-\[9\/16\]/.test(shorts.innerHTML)],
+        ['shorts: the 10-minute clip stays in Latest videos, listed under the wall',
+          Boolean(latest) && latest.textContent.includes('Wide Feature') && !latest.textContent.includes('Tiny Short')],
+      ]
+    },
+  },
+  {
     name: 'portrait uploads keep their shape in the catalogue grid',
     // The home 'Latest videos' section is chronological ROWS by design (since
     // 'Show all latest videos in chronological order'); masonry lives on the
