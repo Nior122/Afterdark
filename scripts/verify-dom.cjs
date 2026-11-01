@@ -237,6 +237,30 @@ async function run() {
     guardVideo?.hasAttribute('controls') && !/[?&]download=/.test(guardVideo?.getAttribute('src') || '')
       && Boolean(guardDom.window.document.querySelector('[data-capture-guard]')),
   )
+
+  // ---- play gate + the WhatsApp twin of the Telegram CTA ----
+  {
+    const cta = guardDom.window.document.querySelectorAll('a[data-cta]')
+    const gateVideoEl = guardDom.window.document.querySelector('[data-capture-guard] video')
+    check('cta: Text WhatsApp sits below Telegram, pointing at the funnel link',
+      cta.length === 2 && cta[0].getAttribute('data-cta') === 'telegram' &&
+        cta[1].getAttribute('data-cta') === 'whatsapp' &&
+        cta[1].getAttribute('href') === 'https://downconvenientmagnetic.com/gnzgnq4tuu?key=65f2307646f602430f34834500ac67c9' &&
+        cta[1].getAttribute('target') === '_blank' && /noopener/.test(cta[1].getAttribute('rel') || ''),
+      JSON.stringify([...cta].map((a) => a.getAttribute('href'))))
+    check('gate: the bare video element carries no autoplay', gateVideoEl && !gateVideoEl.hasAttribute('autoplay'))
+    const opened = []
+    guardDom.window.open = (url) => { opened.push(url); return null }
+    guardDom.window.document.querySelector('[data-play-gate]')?.click()
+    await wait(40)
+    check('gate: first press opens the funnel and stays covering',
+      opened.length === 1 && opened[0] === cta[1]?.getAttribute('href') &&
+        Boolean(guardDom.window.document.querySelector('[data-play-gate]')))
+    guardDom.window.document.querySelector('[data-play-gate]')?.click()
+    await wait(40)
+    check('gate: second press dissolves the gate and the player is live',
+      !guardDom.window.document.querySelector('[data-play-gate]'))
+  }
   feedVideos = []
 
   dom = mountApp('/v/v-pov-tatum-christine/', 'direct')
