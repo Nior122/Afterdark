@@ -442,6 +442,48 @@ const scenarios = [
     ],
   },
   {
+    name: 'play gate: first press opens the funnel, second plays; WhatsApp CTA under Telegram',
+    path: '#/watch/tg-gate-1',
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/videos')) {
+        return Promise.resolve(new Response(JSON.stringify({ videos: [{
+          id: 'tg-gate-1', title: 'Gate Clip', category: 'Homemade', durationSec: 250, width: 1280, height: 720,
+          createdAt: Date.parse('2026-10-05T00:00:00Z'), streamUrl: 'https://worker.test/api/videos/tg-gate-1/stream.mp4',
+        }] }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Gate Clip/.test(text) && /Text WhatsApp/.test(text),
+    probes: (w) => {
+      const FUNNEL = 'https://downconvenientmagnetic.com/gnzgnq4tuu?key=65f2307646f602430f34834500ac67c9'
+      const ctas = [...w.document.querySelectorAll('a[data-cta]')]
+      const video = w.document.querySelector('[data-capture-guard] video')
+      const opened = []
+      const plays = []
+      // Probes run synchronously (no flush points between them), so this
+      // asserts the handler's side effects — the render-level story (cover
+      // dissolving) is proven in verify-dom.
+      w.HTMLMediaElement.prototype.play = function play() { plays.push(this); return Promise.resolve() }
+      w.open = (url) => { opened.push(url); return null }
+      const gateBefore = Boolean(w.document.querySelector('[data-play-gate]'))
+      w.document.querySelector('[data-play-gate]')?.click()
+      w.document.querySelector('[data-play-gate]')?.click()
+      return [
+        ['gate: the bare video is not autoplaying', Boolean(video) && !video.hasAttribute('autoplay')],
+        ['gate: the player starts covered', gateBefore],
+        ['gate: first press opens the funnel, second starts playback',
+          opened.length === 1 && opened[0] === FUNNEL && plays.length === 1 && plays[0] === video],
+        ['cta: Text WhatsApp sits under the Telegram button on the built page',
+          ctas.length === 2 && ctas[0].getAttribute('data-cta') === 'telegram' &&
+            ctas[1].getAttribute('href') === FUNNEL && /noopener/.test(ctas[1].getAttribute('rel') || '')],
+      ]
+    },
+  },
+  {
     name: 'portrait uploads keep their shape in the catalogue grid',
     // The home 'Latest videos' section is chronological ROWS by design (since
     // 'Show all latest videos in chronological order'); masonry lives on the

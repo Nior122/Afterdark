@@ -1,9 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import AdSlot, { GlobalAdScript } from '../components/AdSlot'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
 import TelegramCta from '../components/TelegramCta'
+import WhatsAppCta from '../components/WhatsAppCta'
+import PlayGate from '../components/PlayGate'
 import { useCaptureShield, videoGuardProps } from '../lib/anticapture'
 import { applyVideoMeta } from '../lib/meta'
 import { absoluteUrl } from '../lib/site'
@@ -26,6 +28,8 @@ export default function DirectVideoPage() {
   const video = getVideo(id)
   // Same shield as the site player: unfocused window or hidden tab shows black.
   const shielded = useCaptureShield()
+  // Play gate cover + second-press starter (components/PlayGate.tsx).
+  const playerBoxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (video) applyVideoMeta(video)
@@ -54,6 +58,7 @@ export default function DirectVideoPage() {
   return (
     <main className="mx-auto w-full max-w-[1100px] px-3 py-5 sm:px-6 sm:py-10">
       <div
+        ref={playerBoxRef}
         data-capture-guard=""
         className={[
           'relative w-full select-none overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.55)]',
@@ -122,6 +127,10 @@ export default function DirectVideoPage() {
           </div>
         )}
 
+        {['youtube', 'vimeo', 'embed', 'telegram', 'file'].includes(source.kind) && (
+          <PlayGate boxRef={playerBoxRef} videoId={video.id} />
+        )}
+
         {shielded && (
           <div
             aria-hidden="true"
@@ -137,6 +146,7 @@ export default function DirectVideoPage() {
 
       {/* Owner CTA — under the video, before the description (components/TelegramCta.tsx). */}
       <TelegramCta className="mt-4" />
+      <WhatsAppCta className="mt-2" />
 
       {video.description?.trim() && (
         <p className="mt-3 max-w-[70ch] whitespace-pre-line text-[13px] leading-[1.7] text-muted sm:text-[13.5px]">

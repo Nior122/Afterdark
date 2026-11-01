@@ -61,6 +61,14 @@ on grid cards. It links to the owner's bot (`https://t.me/KasiQueenbot`, constan
 future videos alike. The label sheens, the plane nudges every few seconds and the pill breathes — all
 motion stops under `prefers-reduced-motion`, and the link opens in a new tab with `noopener noreferrer`.
 
+**WhatsApp CTA + play gate:** directly under the Telegram button sits its twin, a WhatsApp-green
+*Text WhatsApp* button, and every playable video gets a transparent play-button overlay: nothing
+autoplays — the first press opens the owner's funnel link (`WHATSAPP_CTA_URL` in
+`src/components/WhatsAppCta.tsx`; the gate and the button share it, change once, rebuild), the
+second press dissolves the overlay and starts the player. The gate re-arms for every video the
+viewer opens next. Page-level like the CTA, so it covers existing and future videos in both site
+modes, and both live under the `a[data-cta]` allowance the standalone-page invariants use.
+
 Fields: URL (required), title (required, auto-filled for YouTube links), optional thumbnail URL,
 category and optional duration (`8:31` or seconds). Everything is stored in the browser only —
 `localStorage` key `gridwatch.store.v1` (legacy key retained so existing browsers keep their data) — and can be wiped by clearing site data. Uploaded videos are

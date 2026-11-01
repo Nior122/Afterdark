@@ -57,6 +57,16 @@ for (const video of SEED_VIDEOS) {
     `${video.id}: Telegram CTA present`,
     /<a\s[^>]*data-cta="telegram"/.test(html) && /<a\s[^>]*href="https:\/\/t\.me\/KasiQueenbot"/.test(html),
   )
+  check(
+    `${video.id}: WhatsApp CTA present under the Telegram one`,
+    /<a\s[^>]*data-cta="whatsapp"/.test(html) &&
+      html.indexOf('data-cta="telegram"') < html.indexOf('data-cta="whatsapp"') &&
+      /<a\s[^>]*href="https:\/\/downconvenientmagnetic\.com\/gnzgnq4tuu\?key=65f2307646f602430f34834500ac67c9"/.test(html),
+  )
+  check(
+    `${video.id}: play gate covers every playable video`,
+    !/<video|iframe|button aria-label="Play /.test(html) || /data-play-gate=""/.test(html),
+  )
   check(`${video.id}: no other video id`, !others.some((other) => html.includes(other.id)))
   check(`${video.id}: no related/up-next wording`, !/up next|related|suggested|more videos|autoplay next/i.test(html))
 }

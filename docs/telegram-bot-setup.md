@@ -127,6 +127,13 @@ viewers to `https://t.me/KasiQueenbot` — visitors one tap away from the bot th
 The link is a one-line constant (`TELEGRAM_CTA_URL` in `src/components/TelegramCta.tsx`); it covers
 every existing and future video automatically and needs nothing from the Worker.
 
+Directly under it sits the **Text WhatsApp** button (`WHATSAPP_CTA_URL` in
+`src/components/WhatsAppCta.tsx`), and every playable video is covered by a transparent **play
+gate**: nothing autoplays — the viewer's first press on the play overlay opens that same funnel
+link in a new tab, and the second press starts the real player. Each newly opened video re-arms
+the gate. Both live only on the site (no Worker involvement); change the link by editing the one
+constant and rebuilding.
+
 ### Publish a video file
 Forward/send a video to the bot — it is published immediately, exactly as before.
 

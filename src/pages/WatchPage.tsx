@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Bell,
@@ -15,6 +15,8 @@ import KebabMenu from '../components/KebabMenu'
 import EmbedPlayer from '../components/EmbedPlayer'
 import TelegramPlayer from '../components/TelegramPlayer'
 import TelegramCta from '../components/TelegramCta'
+import WhatsAppCta from '../components/WhatsAppCta'
+import PlayGate from '../components/PlayGate'
 import NotFoundPage from './NotFoundPage'
 import { channelPath, type Ad } from '../data/seed'
 import { useCaptureShield, videoGuardProps } from '../lib/anticapture'
@@ -97,6 +99,9 @@ export default function WatchPage() {
   // Player stays covered while the window is unfocused or the tab is hidden
   // (see lib/anticapture) — screenshots and app-switcher previews see black.
   const shielded = useCaptureShield()
+  // The play gate covers this box and starts the player behind it on the
+  // second press — see components/PlayGate.tsx.
+  const playerBoxRef = useRef<HTMLDivElement>(null)
 
   const related = useMemo(() => {
     if (!video) return []
@@ -147,6 +152,7 @@ export default function WatchPage() {
     <div className="flex flex-col gap-8 pt-4 rail:flex-row rail:gap-6">
       <div className="min-w-0 flex-1">
         <div
+          ref={playerBoxRef}
           data-capture-guard=""
           className={[
             'relative w-full select-none overflow-hidden rounded-2xl bg-black shadow-[0_18px_50px_-25px_rgba(0,0,0,0.5)]',
@@ -191,7 +197,6 @@ export default function WatchPage() {
               src={source.src}
               poster={video.thumbnail}
               controls
-              autoPlay
               playsInline
               {...videoGuardProps}
               className="absolute inset-0 h-full w-full bg-black"
@@ -238,6 +243,10 @@ export default function WatchPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          {['youtube', 'vimeo', 'embed', 'telegram', 'file'].includes(source.kind) && (
+            <PlayGate boxRef={playerBoxRef} videoId={video.id} />
           )}
 
           {shielded && (
@@ -350,6 +359,7 @@ export default function WatchPage() {
         {/* Owner CTA — between the action row and the description box, outside
             it (see components/TelegramCta.tsx). Only ever on opened videos. */}
         <TelegramCta className="mt-3" />
+        <WhatsAppCta className="mt-2" />
 
         <div className="mt-4 rounded-xl bg-raise px-3.5 py-3">
           <div className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
