@@ -55,6 +55,9 @@ const EXCLUDED_PREFIXES = [
   '/assets/',
   '/thumbnails/',
   '/avatars/',
+  // The 1200x630 image a chat preview shows. Never a page, never redirected:
+  // in direct mode the offer must not replace the card's picture.
+  '/previews/',
   '/api/',
   '/_',
 ]

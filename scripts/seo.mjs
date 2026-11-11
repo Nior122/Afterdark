@@ -127,12 +127,31 @@ export function videoJsonLd(siteUrl, video) {
 /**
  * The per-video <head> block. `verification` (a GSC token) lands on every page
  * so any URL-prefix property verifies, whatever URL the crawler opens.
+ *
+ * `cover` is the card the build composed for this video —
+ * `{ path, width, height }`, see scripts/preview-card.mjs. With one, `og:image`
+ * is that file (big, same-origin, always fetchable) and its REAL dimensions are
+ * declared, which is what makes a chat app commit to the large card instead of a
+ * small square beside the text. Without one (no sharp in the build, or the
+ * poster unreadable) the video's own poster is used and no size is claimed —
+ * honest, because claiming a size the bytes do not have is how you end up with
+ * no preview at all.
  */
-export function buildHead(siteUrl, video, { verification = '' } = {}) {
+export function buildHead(siteUrl, video, { verification = '', cover = null } = {}) {
   const title = `${video.title} — ${SITE_NAME}`
   const description = metaDescription(video)
-  const image = absoluteUrl(siteUrl, video.thumbnail)
+  const coverPath = cover && cover.path ? String(cover.path) : ''
+  const image = absoluteUrl(siteUrl, coverPath || video.thumbnail)
   const url = videoPageUrl(siteUrl, video.id)
+  const sized = coverPath
+    ? [
+        `<meta property="og:image:width" content="${Number(cover.width) || 0}" />`,
+        `<meta property="og:image:height" content="${Number(cover.height) || 0}" />`,
+        `<meta property="og:image:type" content="image/jpeg" />`,
+        `<meta property="og:image:alt" content="${escapeHtml(video.title)}" />`,
+        `<meta name="twitter:image:alt" content="${escapeHtml(video.title)}" />`,
+      ]
+    : []
   const jsonLd = JSON.stringify(videoJsonLd(siteUrl, video)).replace(/</g, '\\u003c')
   return [
     `<title>${escapeHtml(title)}</title>`,
@@ -145,6 +164,7 @@ export function buildHead(siteUrl, video, { verification = '' } = {}) {
     `<meta property="og:title" content="${escapeHtml(video.title)}" />`,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
     `<meta property="og:image" content="${escapeHtml(image)}" />`,
+    ...sized,
     `<meta property="og:url" content="${escapeHtml(url)}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${escapeHtml(video.title)}" />`,
@@ -177,15 +197,24 @@ export function applyHead(shell, head, { basePath = '/', preconnect = '' } = {})
  * sitemap.xml with the Google image extension — every video page carries its
  * poster so Image Search can attribute it, and <lastmod> follows the newest
  * of (updated, added) so re-titles/re-posters refresh the crawl signal.
+ *
+ * `covers` (id → path) points the image entry at the SAME file `og:image` uses,
+ * which is also the one our own host serves: a third-party poster can be
+ * hotlink-blocked or slow, and Google treats a sitemap image it cannot read as
+ * noise.
  */
-export function sitemapXml(siteUrl, videos) {
+export function sitemapXml(siteUrl, videos, covers = new Map()) {
   const entries = videos.map((video) => {
-    const thumb = absoluteUrl(siteUrl, video.thumbnail)
+    // Only a real image gets an <image:image> block: the placeholder is a
+    // stand-in for the UI, never something to advertise to Image Search.
+    const cover = covers.get(video.id)
+    const poster = (cover && cover.path) || video.thumbnail
+    const thumb = poster ? absoluteUrl(siteUrl, poster) : ''
     return [
       '  <url>',
       `    <loc>${escapeXml(videoPageUrl(siteUrl, video.id))}</loc>`,
       `    <lastmod>${isoDate(video.updatedAt || video.addedAt).slice(0, 10)}</lastmod>`,
-      video.thumbnail
+      thumb
         ? '    <image:image>\n'
           + `      <image:loc>${escapeXml(thumb)}</image:loc>\n`
           + `      <image:title>${escapeXml(video.title)}</image:title>\n`

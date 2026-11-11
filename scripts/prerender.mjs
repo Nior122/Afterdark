@@ -37,6 +37,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadCatalogue } from './load-catalogue.mjs'
+import { buildPreviewCards } from './preview-card.mjs'
 import {
   SITE_NAME,
   applyHead,
@@ -90,7 +91,8 @@ const PRECONNECT = (() => {
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{2,}$/
 
-const headFor = (video) => buildHead(SITE_URL, video, { verification: VERIFICATION })
+const headFor = (video, covers) =>
+  buildHead(SITE_URL, video, { verification: VERIFICATION, cover: covers.get(video.id) || null })
 const withHead = (shell, head) => applyHead(shell, head, { basePath, preconnect: PRECONNECT })
 
 const NEUTRAL_TITLE = `<title>${SITE_NAME}</title>`
@@ -191,10 +193,21 @@ async function main() {
     videos.push(video)
   }
 
+  // Big preview cards first: the page metadata has to point at the file the
+  // build is about to write, and a card that could not be made simply leaves
+  // that video on its poster (see scripts/preview-card.mjs for why this exists).
+  const { covers, made, skipped } = await buildPreviewCards({
+    videos,
+    outDir: join(dist, 'previews'),
+    log: (message) => console.warn(`    ${message}`),
+  })
+  if (made) console.log(`✓ composed ${made} preview card(s) (1200×630, or 1000×1000 for vertical clips) for chat and search previews`)
+  else if (skipped) console.warn(`⚠️  no preview cards (${skipped} poster(s) unusable or sharp missing) — video previews keep the source poster`)
+
   for (const video of videos) {
     const dir = join(dist, 'v', video.id)
     await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'index.html'), withHead(shell, headFor(video)), 'utf8')
+    await writeFile(join(dir, 'index.html'), withHead(shell, headFor(video, covers)), 'utf8')
   }
 
   // The owner dashboard gets its own file so /admin/ is a 200, not a 404.
@@ -205,7 +218,7 @@ async function main() {
     'utf8',
   )
 
-  await writeFile(join(dist, 'sitemap.xml'), sitemapXml(SITE_URL, videos), 'utf8')
+  await writeFile(join(dist, 'sitemap.xml'), sitemapXml(SITE_URL, videos, covers), 'utf8')
   await writeFile(join(dist, 'robots.txt'), robotsTxt(SITE_URL), 'utf8')
 
   // Catalogue shell + unknown-path fallback: neutral, noindex (but follow),
