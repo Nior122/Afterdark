@@ -323,6 +323,16 @@ console.log('\n— link previews on the in-app /watch/ route')
 
   const videoBot = await run('/v/tg-4493bfffd4d3/', { settings: public_, ua: 'WhatsApp/2.23.18.0' })
   check('the video page itself is served, not redirected', videoBot.status === 200, `${videoBot.status}`)
+
+  // The composed preview card lives at /previews/<id>.jpg. In direct mode every
+  // HTML page that is not a video page is 302'd at the offer, so if that rule ever
+  // caught the card, every chat preview would lose its picture — and a bot fetching
+  // an image would be handed an offer. Both directions must stay a 200.
+  for (const [label, ua] of [['visitor', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120'], ['WhatsApp', 'WhatsApp/2.23.18.0']]) {
+    const image = await run('/previews/tg-4493bfffd4d3.jpg', { settings: direct, ua })
+    check(`a card image is served as an image to a ${label}, never redirected to the offer`,
+      image.status === 200 && !image.headers.get('location'), `${image.status} ${image.headers.get('location')}`)
+  }
 }
 
 globalThis.fetch = realFetch

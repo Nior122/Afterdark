@@ -288,15 +288,27 @@ should see **Owner sign-in**.
 > you pasted before can't be changed, so a preview request for `/watch/<id>` is now
 > answered by the video's own page automatically.
 >
-> A preview needs a big image to be shown big: under roughly 300×200, WhatsApp and
-> Telegram both drop the picture to a small square. A Telegram video thumb is fixed
-> at 180×320 and the Bot API cannot produce a larger one, so the preview now asks
-> the Worker for the largest poster on that record — which is the source page's own
-> image when the clip was imported from a link, and the Telegram thumb otherwise.
-> The visitor still only ever sees a `worker…/api/videos/<id>/thumb.jpg` URL, and the
-> page keeps loading the light thumb. That ask lives in the Worker, so it needs the
-> same `wrangler deploy` as everything else here; until then the preview works, with
-> the smaller picture.
+> **How big is "big"?** Under roughly 300×200, WhatsApp and Telegram stop drawing a
+> large card and show a small square beside the text instead. A clip posted from
+> Telegram has exactly that problem: the Bot API's video thumbnail is fixed at
+> 180×320 and no larger one exists. So the **build** now composes a real preview
+> card for every video — 1200×630 for a horizontal clip, 1000×1000 for a vertical
+> one (a square shows about 2.5× more of a phone-shaped clip than a wide card, and
+> no app crops it) — from the poster that video already has, blurred behind the
+> uncropped frame. It is written next to the site at `/previews/<id>.jpg`, and the
+> page's `og:image` points at it while the player keeps loading the small file. The
+> title is not burned into the picture: the chat app prints `og:title` under the
+> image itself, which is the layout you are after.
+>
+> Card generation uses `sharp`, an **optional** dependency: when it is missing the
+> build prints `⚠️ no preview cards …` and every page keeps its source poster — a
+> smaller preview, never a broken deploy.
+>
+> When no card can be built for a video, its page falls back to the biggest poster
+> the Worker holds: `.../api/videos/<id>/thumb.jpg?poster=1`, which for a clip
+> imported from a link is the source page's own image and otherwise the Telegram
+> thumb. The visitor never sees the source URL — it is proxied — and that fallback
+> is the one part that needs the current Worker deployed.
 >
 > The home page's own card is text unless you add `public/og-cover.jpg` (1200×630
 > JPG, keep it under ~300 KB) — the next build puts it on the card as the site

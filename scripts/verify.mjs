@@ -12,7 +12,8 @@
  * - "/" and the unknown-path shell list no videos and are noindex
  */
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadCatalogue } from './load-catalogue.mjs'
@@ -95,6 +96,113 @@ console.log('— the site itself previews as a card')
   const shell = await read('v/_shell.html')
   check('the /v/ fallback shell leaves the metadata for the middleware to inject',
     !/property="og:(title|description|image|url)"/.test(shell))
+}
+
+console.log('— preview cards (the big image a chat app shows)')
+{
+  const { buildPreviewCards, cardCanvasFor, loadSharp, MIN_CARD_EDGE, MAX_BYTES, SQUARE_SIZE, WIDE_WIDTH, WIDE_HEIGHT } =
+    await import('./preview-card.mjs')
+
+  /** Read the size out of JPEG bytes — no library, because a claim must be checked against the file itself. */
+  const jpegSize = (bytes) => {
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null
+    let i = 2
+    while (i + 9 < bytes.length) {
+      if (bytes[i] !== 0xff) { i += 1; continue }
+      const marker = bytes[i + 1]
+      const length = (bytes[i + 2] << 8) | bytes[i + 3]
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: (bytes[i + 5] << 8) | bytes[i + 6], width: (bytes[i + 7] << 8) | bytes[i + 8] }
+      }
+      i += 2 + length
+    }
+    return null
+  }
+
+  check('a vertical clip gets the square card, a wide one the 16:9 card',
+    cardCanvasFor(180, 320).width === SQUARE_SIZE && cardCanvasFor(180, 320).height === SQUARE_SIZE
+      && cardCanvasFor(640, 360).width === WIDE_WIDTH && cardCanvasFor(640, 360).height === WIDE_HEIGHT,
+    JSON.stringify({ tall: cardCanvasFor(180, 320), wide: cardCanvasFor(640, 360) }))
+  check('both cards clear the edge the apps need to show one large',
+    Math.min(SQUARE_SIZE, WIDE_WIDTH, WIDE_HEIGHT) >= MIN_CARD_EDGE)
+
+  const sharp = await loadSharp()
+  check('sharp resolves as an optional dependency (absent is allowed, never fatal)', sharp === null || typeof sharp === 'function')
+
+  if (sharp) {
+    // Any poster is enough to prove the geometry: the card must come out at the
+    // size the metadata will declare, or the claim in og:image is a lie.
+    const poster = await sharp({
+      create: { width: 180, height: 320, channels: 3, background: { r: 190, g: 30, b: 80 } },
+    }).jpeg().toBuffer()
+    const dataUri = `data:image/jpeg;base64,${poster.toString('base64')}`
+    const dir = await mkdtemp(join(tmpdir(), 'afterdark-covers-'))
+    const built = await buildPreviewCards({
+      videos: [{ id: 'unit-card', thumbnail: dataUri }, { id: 'no-poster', thumbnail: '' }],
+      outDir: dir,
+      fetchImpl: async (url) => (String(url).startsWith('data:')
+        ? new Response(Buffer.from(String(url).split(',')[1], 'base64'))
+        : Promise.reject(new Error('only data: URLs in this check'))),
+    })
+    const file = join(dir, 'unit-card.jpg')
+    const size = jpegSize(await readFile(file))
+    check('a poster becomes a square card of the declared size',
+      size && size.width === SQUARE_SIZE && size.height === SQUARE_SIZE, JSON.stringify(size))
+    check('the card is a JPEG small enough for a crawler to fetch gladly',
+      (await stat(file)).size <= MAX_BYTES, String((await stat(file)).size))
+    check('the card path is site-relative so it follows the deployment',
+      built.covers.get('unit-card')?.path === '/previews/unit-card.jpg'
+        && built.covers.get('unit-card')?.width === SQUARE_SIZE,
+      JSON.stringify(built.covers.get('unit-card')))
+    check('a video without a poster is skipped, not guessed',
+      built.covers.has('unit-card') && !built.covers.has('no-poster') && built.skipped >= 1,
+      JSON.stringify({ made: built.made, skipped: built.skipped }))
+    const starved = await buildPreviewCards({
+      videos: [{ id: 'too-late', thumbnail: dataUri }],
+      outDir: dir,
+      deadlineMs: -1,
+      fetchImpl: async () => { throw new Error('must not even be tried') },
+    })
+    check('a build that runs out of time skips the cards instead of failing',
+      starved.made === 0 && starved.skipped === 1 && starved.timedOut === true,
+      JSON.stringify({ made: starved.made, skipped: starved.skipped, timedOut: Boolean(starved.timedOut) }))
+    const { composeCard } = await import('./preview-card.mjs')
+    check('unreadable bytes produce no card rather than a broken one', (await composeCard(sharp, Buffer.from('not an image'))) === null)
+    await rm(dir, { recursive: true, force: true })
+  }
+
+  // The real build output: every page must claim exactly what its file holds.
+  let sized = 0
+  for (const video of videos) {
+    let html
+    try {
+      html = await read(`v/${video.id}/index.html`)
+    } catch {
+      continue
+    }
+    const image = /property="og:image" content="([^"]+)"/.exec(html)?.[1] || ''
+    const declared = /property="og:image:width" content="(\d+)"/.exec(html)?.[1] || ''
+    const declaredHeight = /property="og:image:height" content="(\d+)"/.exec(html)?.[1] || ''
+    let card = null
+    try {
+      card = jpegSize(await readFile(join(dist, 'previews', `${video.id}.jpg`)))
+    } catch {
+      card = null
+    }
+    if (card) {
+      sized += 1
+      check(`${video.id}: page points at its own card`, image.endsWith(`/previews/${video.id}.jpg`), image)
+      check(`${video.id}: declared size matches the bytes on disk (a lie here means no big card)`,
+        declared === String(card.width) && declaredHeight === String(card.height), `${declared}x${declaredHeight} vs ${card.width}x${card.height}`)
+      check(`${video.id}: card is big enough for the large layout`,
+        Math.min(card.width, card.height) >= MIN_CARD_EDGE, `${card.width}x${card.height}`)
+      check(`${video.id}: the sitemap advertises the same image the page shows`,
+        sitemap.includes(`${siteUrl}/previews/${video.id}.jpg`))
+    } else {
+      check(`${video.id}: no card, so no size is claimed`, !declared && !declaredHeight && Boolean(image), image)
+    }
+  }
+  console.log(`  · ${sized}/${videos.length} video page(s) carry a composed preview card`)
 }
 
 console.log('— video pages')
