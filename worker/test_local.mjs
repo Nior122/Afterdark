@@ -493,6 +493,12 @@ async function main() {
 
   console.log('— basics')
   check('health ok', (await call(env, 'https://worker.test/health')).status === 200)
+  {
+    // The owner deploys this file by pasting it, so /health is the only way to
+    // tell which code is live. It must name the build, not just say "ok".
+    const health = await (await call(env, 'https://worker.test/health')).text()
+    check('health reports the deploy stamp (YYYY-MM-DD.N)', /ok · build \d{4}-\d{2}-\d{2}\.\d+/.test(health), health)
+  }
   check('bad webhook secret -> 401', (await webhook(env, msg(111, { text: '/start' }), 'wrong')).status === 401)
 
   console.log('— ownership')

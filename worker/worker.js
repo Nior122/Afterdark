@@ -47,7 +47,7 @@
  *   /api/admin/*                   Dashboard API (Bearer ADMIN_TOKEN): videos incl.
  *                                  view counts, bulk delete/recategorise, drafts,
  *                                  per-URL scrape (duplicates reported), settings
- *   GET  /health                   "ok"
+ *   GET  /health                   "ok" + the build stamp below (did my paste take?)
  *
  * Required configuration (Cloudflare dashboard -> Worker -> Settings)
  * -------------------------------------------------------------------
@@ -118,6 +118,17 @@
  * the bot tells you when this happens. Scraped links are never uploaded,
  * only referenced (link-only, nothing stored).
  */
+
+/**
+ * Deploy stamp — bump this the day you change this file, format YYYY-MM-DD.N.
+ *
+ * `GET /health` answers with it, so "did my paste take?" is a one-second check in
+ * a browser tab instead of a guess: this Worker is pasted into the Cloudflare
+ * dashboard (there is no build step), so nothing else tells you which code is
+ * actually running. scripts/verify.mjs fails if worker.js is edited without
+ * bumping this, so the stamp cannot quietly drift out of date.
+ */
+const WORKER_BUILD = '2026-11-11.1'
 
 // Keep in sync with CATEGORIES in src/data/seed.ts (minus "All").
 const CATEGORIES = [
@@ -211,7 +222,7 @@ export default {
     const { pathname } = url
 
     if (pathname === '/' || pathname === '/health') {
-      return new Response('AfterDark Telegram bot worker: ok', {
+      return new Response(`AfterDark Telegram bot worker: ok · build ${WORKER_BUILD}`, {
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       })
     }

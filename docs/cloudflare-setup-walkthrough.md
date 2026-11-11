@@ -57,7 +57,7 @@ Then check it worked:
 
 | Open | Old code | Updated code |
 | --- | --- | --- |
-| `/health` | `ok` | `ok` |
+| `/health` | `ok` | `ok · build 2026-11-11.1` (a date at least as new as the code you pasted) |
 | `/api/settings` | `Not found` (404) | `{"mode":"public","modes":["public","direct"],"updatedAt":…}` |
 
 | Keep exactly as it is | Why |
@@ -276,7 +276,7 @@ should see **Owner sign-in**.
 | `https://nior122.github.io/Afterdark/` | the site (catalogue, or the neutral page when direct mode is on) |
 | `https://nior122.github.io/Afterdark/v/<id>/` | one video, shareable and indexable — **this** is the link to paste for a chat preview |
 | `https://nior122.github.io/Afterdark/admin/` | your dashboard |
-| `https://afterdark-bot.<you>.workers.dev/health` | Worker alive check |
+| `https://afterdark-bot.<you>.workers.dev/health` | Worker alive check **+ which build is running** (the stamp) |
 | `https://afterdark-bot.<you>.workers.dev/api/settings` | what mode is currently on |
 
 > **Sharing a link.** Every video page carries the tags chat apps read for a
@@ -322,6 +322,7 @@ should see **Owner sign-in**.
 | --- | --- |
 | `/health` shows `Hello World` | The code paste didn't replace everything. Part 2, steps 5–7 |
 | `/health` shows `ok` but the bot never answers | Webhook not set or wrong secret → redo Part 5, then check `getWebhookInfo` |
+| `/health` says `ok` with no `build …` after it, or an old date | You are still running the previous code: the paste did not deploy. Re-paste the file, then press **Deploy** (the editor saves a draft silently) |
 | Bot answers `/start` with "not the owner" | Someone else already claimed it. Send `/start` from that account, or delete the `cfg:owner` key in KV (Storage → KV → `afterdark-videos` → `cfg:owner` → Delete) and send `/start` again |
 | `/mode` says the switch is unavailable | The Worker is running old code. Re-paste the latest `worker/worker.js` and Deploy |
 | `/videos` works but the site shows nothing new | Part 7 step 1–3: the `VITE_TELEGRAM_FEED_URL` variable, then re-run the deploy workflow |
