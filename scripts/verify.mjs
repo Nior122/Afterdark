@@ -11,6 +11,7 @@
  * - no page links to another video
  * - "/" and the unknown-path shell list no videos and are noindex
  */
+import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -260,6 +261,30 @@ console.log('— new-video fallback')
   check('fallback shell exists for videos added after the build', shell.length > 0)
   check('fallback shell is noindex', /<meta name="robots" content="noindex/.test(shell))
   check('fallback shell is not in the sitemap', !sitemap.includes('_shell'))
+}
+
+console.log('— deploy stamp (the Worker is pasted into a dashboard, so it needs a marker)')
+{
+  const source = await readFile(join(root, 'worker/worker.js'), 'utf8')
+  const stamp = /const WORKER_BUILD = '(\d{4}-\d{2}-\d{2})\.(\d+)'/.exec(source)
+  check('worker.js carries a deploy stamp', Boolean(stamp), 'expected const WORKER_BUILD = YYYY-MM-DD.N')
+  check('GET /health reports it, so "did my paste take?" is a one-second check',
+    /build \$\{WORKER_BUILD\}/.test(source))
+  let lastTouched = ''
+  try {
+    lastTouched = execFileSync('git', ['log', '-1', '--format=%cs', '--', 'worker/worker.js'], {
+      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    lastTouched = '' // no git here (a Pages build container): nothing to compare against
+  }
+  if (lastTouched && stamp) {
+    check('the stamp is at least as new as the last commit that touched the Worker',
+      stamp[1] >= lastTouched,
+      `stamp ${stamp[1]} vs commit ${lastTouched} — bump WORKER_BUILD in worker/worker.js`)
+  } else {
+    console.log('  · stamp-vs-git skipped (no git history in this checkout)')
+  }
 }
 
 console.log('— summary')
