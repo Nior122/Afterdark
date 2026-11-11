@@ -1106,6 +1106,24 @@ async function main() {
   const adminViewList = await (await admin('videos', { headers: auth })).json()
   check('admin list exposes views + total', adminViewList.videos.find((x) => x.id === watched.id)?.views === 3 && adminViewList.viewsTotal === 4, JSON.stringify({ total: adminViewList.viewsTotal }))
 
+  console.log('— daily views bucket (resets at Lagos midnight)')
+  {
+    const dailyRes = await (await admin('views/daily', { headers: auth })).json()
+    const dayIso = new Date(Date.now() + 3_600_000).toISOString().slice(0, 10)
+    check('the day key names the bucket (today, West Africa Time)', dailyRes.day === dayIso, JSON.stringify(dailyRes))
+    check('daily totals exactly the ACCEPTED views (4 of 7 POSTs)', dailyRes.count === 4, JSON.stringify(dailyRes))
+    check('the history spans seven days ending today',
+      dailyRes.history?.length === 7 && dailyRes.history[6].day === dayIso && dailyRes.history[6].count === 4,
+      JSON.stringify(dailyRes.history))
+    check('older days report honest zeros', dailyRes.yesterday === 0 && dailyRes.history[0].count === 0)
+    check('the bucket self-expires after seven days', adminEnv.VIDEOS.ttls.get(`vday:${dayIso}`) === 604800,
+      String(adminEnv.VIDEOS.ttls.get(`vday:${dayIso}`)))
+    check('daily-views is admin-only', (await call(adminEnv, 'https://worker.test/api/admin/views/daily')).status === 401)
+    // The public feed must not grow a daily-bucket reader: vday keys are
+    // invisible outside the admin route.
+    check('the daily bucket never leaks into the feed', !JSON.stringify(await feedOf(adminEnv)).includes('vday'))
+  }
+
   console.log('— bulk management')
   const two = (await (await admin('videos', { headers: auth })).json()).videos.slice(0, 2)
   const bulkPatch = await admin('videos/bulk-patch', {
@@ -1133,6 +1151,8 @@ async function main() {
   check('delete clears the counter', (await adminEnv.VIDEOS.get(`views:${two[0].id}`)) == null)
   const listed = await (await admin('videos', { headers: auth })).json()
   check('views total follows the delete', listed.viewsTotal === listed.videos.reduce((sum, v) => sum + v.views, 0), JSON.stringify({ viewsTotal: listed.viewsTotal }))
+  const dailyAfterDelete = await (await admin('views/daily', { headers: auth })).json()
+  check('a day that happened stays counted: deletes never rewrite history', dailyAfterDelete.count === 4, JSON.stringify(dailyAfterDelete))
 
   console.log('— bulk scrape flow (scrape -> publish-all / review / discard)')
   const bulkDraftScrape = await (await admin('scrape', { method: 'POST', headers: auth, body: JSON.stringify({ url: 'https://sometube.test/more' }) })).json()

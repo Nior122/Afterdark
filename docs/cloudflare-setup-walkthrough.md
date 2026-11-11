@@ -253,6 +253,10 @@ should see **Owner sign-in**.
 3. You now have, on one page:
    - **Site mode** — the same toggle as `/mode` in the bot, with a switch.
    - **Videos** — rename, change category, delete.
+   - **Views today** — how many *real* (deduplicated) views the whole site got
+     today, with the day before and the last seven days. It resets by itself at
+     12:00 AM Nigerian time (WAT); the card counts down to that moment. Deleting
+     a video never rewrites a day that already happened.
    - **Add from link** — paste a URL to scrape it into drafts.
    - **Drafts** — edit / publish / publish all / discard.
    - **Rebuild site** — regenerates the video pages and `sitemap.xml`
