@@ -623,6 +623,47 @@ async function main() {
   check('thumb ok', thumb.status === 200 && thumb.headers.get('content-type') === 'image/jpeg')
   check('unknown id -> 404', (await call(env, 'https://worker.test/api/videos/tg-nope/stream.mp4')).status === 404)
 
+  console.log('— chat previews: thumb.jpg?poster=1 asks for the big poster')
+  {
+    const penv = { BOT_TOKEN: TOKEN, WEBHOOK_SECRET: SECRET, FEED_MEMO_MS: 0, VIDEOS: new MockKV() }
+    await webhook(penv, textMsg(111, '/start'))
+    await webhook(penv, videoMsg(111, 'poster clip'))
+    const rec = (await feedOf(penv))[0]
+    const stored = JSON.parse(await penv.VIDEOS.get(`v:${rec.id}`))
+    check('the feed keeps pointing at our own proxy (the source URL stays private)',
+      Boolean(stored.thumbFileId) && rec.thumbUrl === `https://worker.test/api/videos/${rec.id}/thumb.jpg`,
+      JSON.stringify({ file: stored.thumbFileId, url: rec.thumbUrl }))
+    stored.thumbUrl = 'https://cdn.proxy.test/uploads/big-baddie.jpg'
+    await penv.VIDEOS.put(`v:${rec.id}`, JSON.stringify(stored))
+
+    proxiedUpstream.length = 0
+    const small = await call(penv, `https://worker.test/api/videos/${rec.id}/thumb.jpg`)
+    check('without the flag the page keeps loading the light Telegram thumb',
+      small.status === 200 && proxiedUpstream.length === 0, JSON.stringify(proxiedUpstream))
+
+    proxiedUpstream.length = 0
+    const big = await call(penv, `https://worker.test/api/videos/${rec.id}/thumb.jpg?poster=1`)
+    check('the flag answers with the source poster, proxied through us',
+      big.status === 200 && big.headers.get('content-type') === 'image/jpeg'
+        && (await big.arrayBuffer()).byteLength === JPG.length, `${big.status}`)
+    check('one upstream fetch, for the image only',
+      proxiedUpstream.length === 1 && proxiedUpstream[0].kind === 'thumb', JSON.stringify(proxiedUpstream))
+
+    // A record with no poster on it must not lose its preview: the flag can
+    // only improve the answer, never empty it.
+    const fenv = { BOT_TOKEN: TOKEN, WEBHOOK_SECRET: SECRET, FEED_MEMO_MS: 0, VIDEOS: new MockKV() }
+    await webhook(fenv, textMsg(111, '/start'))
+    await webhook(fenv, videoMsg(111, 'no poster clip'))
+    const lone = (await feedOf(fenv))[0]
+    const loneRecord = JSON.parse(await fenv.VIDEOS.get(`v:${lone.id}`))
+    loneRecord.thumbUrl = ''
+    await fenv.VIDEOS.put(`v:${lone.id}`, JSON.stringify(loneRecord))
+    proxiedUpstream.length = 0
+    const fell = await call(fenv, `https://worker.test/api/videos/${lone.id}/thumb.jpg?poster=1`)
+    check('nothing bigger on record -> the small thumb answers anyway',
+      fell.status === 200 && proxiedUpstream.length === 0, `${fell.status}`)
+  }
+
   console.log('— scraping: single page')
   sentMessages = []
   await webhook(env, textMsg(111, 'https://sometube.test/video/hotel-hookup'))

@@ -42,10 +42,12 @@ const check = (name, condition, extra = '') => {
 }
 
 /** Make a context; `next` returns 200 unless `missing` says 404. */
-function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true, slash308 = false, siteUrl = '' } = {}) {
+function context(path, { settings = null, accept = 'text/html', method = 'GET', missing = [], shell = true, slash308 = false, siteUrl = '', ua = '' } = {}) {
   const url = `${SITE}${path}`
+  const headers = { accept }
+  if (ua) headers['user-agent'] = ua
   return {
-    request: new Request(url, { method, headers: { accept } }),
+    request: new Request(url, { method, headers }),
     env: {
       VITE_TELEGRAM_FEED_URL: WORKER,
       VITE_SITE_URL: siteUrl,
@@ -244,7 +246,7 @@ console.log('— live SEO head for videos published after the last build')
   check('the noindex header is gone on a real video page', !page.headers.get('x-robots-tag'))
   check('canonical points at the video URL', html.includes(`href="${SITE}/v/w-fresh-clip/"`))
   check('VideoObject JSON-LD is injected with real views', html.includes('"@type":"VideoObject"') && html.includes('"userInteractionCount":7'))
-  check('OG block carries the proxied poster', html.includes('property="og:image" content="https://worker.test/api/videos/w-fresh-clip/thumb.jpg"'))
+  check('OG block asks the proxy for the big poster a card needs', html.includes('property="og:image" content="https://worker.test/api/videos/w-fresh-clip/thumb.jpg?poster=1"'))
   check('live pages revalidate within the minute', (page.headers.get('cache-control') || '').includes('max-age=60'))
 
   const missingId = await run('/v/w-nope-nope/', { settings, missing: ['/v/w-nope-nope/'], feed })
@@ -263,6 +265,64 @@ console.log('— live SEO head for videos published after the last build')
     'VITE_SITE_URL pins the canonical even when served from a preview origin',
     (await custom.text()).includes('href="https://afterdark.example/v/w-fresh-clip/"'),
   )
+}
+
+
+// ------------------------------------------------------ link previews ----
+// What the owner sees when they paste a video link into a chat: the app's own
+// /watch/<id> route has no metadata, so the middleware hands preview fetches to
+// the prerendered /v/<id>/ page — without touching a browser's navigation.
+console.log('\n— link previews on the in-app /watch/ route')
+{
+  const public_ = { mode: 'public', redirectUrl: '', ads: { enabled: false } }
+  const direct = { mode: 'direct', redirectUrl: 'https://ads.example.com/offer', ads: { enabled: false } }
+  const BOT_UAS = [
+    'WhatsApp/2.23.18.0',
+    'TelegramBot (like TwitterBot)',
+    'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    'Twitterbot/1.0',
+    'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)',
+    'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 13_4_5 like Mac OS X) like Gecko BridgeBot/1.0 crds_fetcher ios ivars bot imessagebot predarbots',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  ]
+  for (const ua of BOT_UAS) {
+    const res = await run('/watch/tg-4493bfffd4d3', { settings: public_, ua })
+    check(`preview fetch (${ua.split(/\s+/)[0].slice(0, 22)}) is answered by the video page`,
+      res.status === 302 && res.headers.get('location') === `${SITE}/v/tg-4493bfffd4d3/`,
+      `${res.status} ${res.headers.get('location')}`)
+  }
+
+  const hop = await run('/watch/tg-4493bfffd4d3/', { settings: public_, ua: 'WhatsApp/2.23.18.0' })
+  check('the trailing-slash form hops the same way', hop.status === 302 && hop.headers.get('location') === `${SITE}/v/tg-4493bfffd4d3/`)
+  check('the preview hop is never cacheable (a shared cache must not hand it to a browser)',
+    (hop.headers.get('cache-control') || '').includes('no-store') && (hop.headers.get('vary') || '').includes('User-Agent'),
+    `${hop.headers.get('cache-control')} / ${hop.headers.get('vary')}`)
+
+  const human = await run('/watch/tg-4493bfffd4d3', { settings: public_, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36' })
+  check('a person on /watch/<id> sees no redirect at all', human.status === 200 && !human.headers.get('location'), `${human.status} ${human.headers.get('location')}`)
+
+  const directHuman = await run('/watch/tg-4493bfffd4d3', { settings: direct, ua: 'Mozilla/5.0 (Macintosh) Safari/537.36' })
+  check('direct mode still funnels a human clicking the old link', directHuman.status === 302 && directHuman.headers.get('location') === 'https://ads.example.com/offer')
+  const directBot = await run('/watch/tg-4493bfffd4d3', { settings: direct, ua: 'WhatsApp/2.23.18.0' })
+  check('direct mode still shows the card to the chat app', directBot.status === 302 && directBot.headers.get('location') === `${SITE}/v/tg-4493bfffd4d3/`)
+
+  for (const path of ['/watch', '/watch/', '/watch/a.png', '/watching/tg-1']) {
+    const res = await run(path, { settings: public_, ua: 'WhatsApp/2.23.18.0' })
+    check(`${path} is left alone even for a bot`, !res.headers.get('location'), `${res.status} ${res.headers.get('location')}`)
+  }
+
+  globalThis.fetch = realFetch
+  const noOrigin = {
+    request: new Request(`${SITE}/watch/tg-4493bfffd4d3`, { headers: { accept: 'text/html', 'user-agent': 'WhatsApp/2.23.18.0' } }),
+    env: {},
+    next: async () => new Response('STATIC', { status: 200 }),
+  }
+  const bareHop = await onRequest(noOrigin)
+  check('the preview hop works without a Worker configured', bareHop.status === 302 && bareHop.headers.get('location') === `${SITE}/v/tg-4493bfffd4d3/`, `${bareHop.status}`)
+
+  const videoBot = await run('/v/tg-4493bfffd4d3/', { settings: public_, ua: 'WhatsApp/2.23.18.0' })
+  check('the video page itself is served, not redirected', videoBot.status === 200, `${videoBot.status}`)
 }
 
 globalThis.fetch = realFetch

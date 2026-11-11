@@ -35,6 +35,9 @@ let mode = 'public'
 let adminVideos = []
 let adminDrafts = []
 let feedVideos = []
+// Flip to true to answer /api/admin/views/daily the way a Worker that predates
+// the endpoint does — the dashboard must explain itself, not sit empty.
+let dailyViewsMissing = false
 const requests = []
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -78,6 +81,7 @@ function mockFetch() {
     }
     if (url.endsWith('/api/admin/videos')) return new Response(JSON.stringify({ videos: adminVideos, total: adminVideos.length }), { status: 200 })
     if (url.endsWith('/api/admin/views/daily')) {
+      if (dailyViewsMissing) return new Response('{"error":"not-found"}', { status: 404 })
       return new Response(JSON.stringify({
         day: '2026-11-04',
         count: 7,
@@ -272,6 +276,39 @@ async function run() {
     await wait(40)
     check('gate: second press dissolves the gate and the player is live',
       !guardDom.window.document.querySelector('[data-play-gate]'))
+
+    // ---- what a shared link becomes (src/lib/site.ts shareUrl) ----
+    // A chat app builds its preview card from the HTML at the URL, so the link
+    // the site hands out must be the video's own prerendered /v/ page. The
+    // in-app /watch/ route is the same video but a bare shell to a bot.
+    const prompts = []
+    guardDom.window.prompt = (title, value) => {
+      prompts.push(value)
+      return value
+    }
+    const sharePill = [...guardDom.window.document.querySelectorAll('button')].find(
+      (button) => (button.textContent || '').trim() === 'Share',
+    )
+    check('share: the watch page exposes a Share action', Boolean(sharePill))
+    sharePill?.click()
+    await wait(30)
+    check('share: the copied link is the video page that previews, not the SPA route',
+      prompts.length === 1 && prompts[0] === 'https://afterdark.test/v/tg-guard-1/',
+      JSON.stringify(prompts))
+
+    const kebab = guardDom.window.document.querySelector('button[aria-label="More actions"]')
+    kebab?.click()
+    await wait(30)
+    prompts.length = 0
+    const shareItem = [...guardDom.window.document.querySelectorAll('[role="menuitem"]')].find(
+      (button) => (button.textContent || '').trim() === 'Share',
+    )
+    check('share: the card menu has the same action', Boolean(shareItem))
+    shareItem?.click()
+    await wait(30)
+    check('share: the card menu copies the same preview-ready link',
+      prompts.length === 1 && prompts[0] === 'https://afterdark.test/v/tg-guard-1/',
+      JSON.stringify(prompts))
   }
   feedVideos = []
 
@@ -320,6 +357,18 @@ async function run() {
     check('dashboard: seven history bars with today highlighted',
       bars.length === 7 && bars.some((el) => /bg-brand-600/.test(el.className)) && bars.some((el) => /bg-brand-200/.test(el.className)),
       bars.map((el) => el.className).join(' | ').slice(0, 200))
+  }
+  {
+    // The Worker still holds the old code: the endpoint 404s. The card must say
+    // what is missing instead of rendering an empty box.
+    dailyViewsMissing = true
+    dom = mountApp('/admin/', 'public', true, { 'afterdark.admin.v1': 'dom-admin-token' })
+    await wait(700)
+    const staleText = (dom.window.document.querySelector('[data-daily-views]')?.textContent || '').replace(/\s+/g, ' ').trim()
+    check('dashboard: an old Worker is reported as such, not as a silent zero',
+      /Nothing to read from your Worker yet/.test(staleText) && /wrangler deploy/.test(staleText) && /Views today\s*\u2014/.test(staleText),
+      staleText.slice(0, 240))
+    dailyViewsMissing = false
   }
   const thumbImg = (el) => (el.getAttribute('src') || '').includes('portrait.jpg')
   let imgs = Array.from(dom.window.document.querySelectorAll('img')).filter(thumbImg)

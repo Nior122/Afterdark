@@ -45,6 +45,24 @@ export function videoUrl(id: string): string {
 }
 
 /**
+ * The link to hand to another person: the video's own `/v/<id>/` page, on the
+ * host the visitor is actually using, under the deployment's sub-path.
+ *
+ * This URL is the one that previews. Chat bots (WhatsApp, Telegram, iMessage,
+ * Discord, Facebook) never run JavaScript, so only a page that ships its own
+ * `<meta property="og:*">` block in the HTML produces a card with a thumbnail
+ * and the caption — and the only such page is the prerendered `/v/<id>/` one.
+ * `/watch/<id>` is the same video inside the app but a bare shell to a bot:
+ * pasting it shows nothing but the URL. SITE_URL is not used here on purpose:
+ * it is baked at build time and can name a different host (or a stale one)
+ * while the visitor is clearly reading the site from this origin.
+ */
+export function shareUrl(id: string): string {
+  if (typeof window === 'undefined') return videoUrl(id)
+  return `${window.location.origin}${deployBase()}${videoPath(id).replace(/^\/+/, '')}`
+}
+
+/**
  * Directory the app is mounted at: `/` at a domain root, `/Afterdark/` on
  * GitHub Pages. Taken from the `<base href>` the prerender step injects (which
  * is derived from VITE_SITE_URL), falling back to Vite's BASE_URL.

@@ -221,10 +221,16 @@ export function robotsTxt(siteUrl) {
  */
 export function feedToSeoVideo(v) {
   if (!v || !v.id || !(v.streamUrl || v.sourceUrl)) return null
+  const poster = String(v.thumbUrl || '')
   return {
     id: String(v.id),
     title: String(v.title || 'Video'),
-    thumbnail: v.thumbUrl || '',
+    // Metadata asks the proxy for the biggest poster it holds (see the Worker's
+    // handleMedia): a preview card needs an image large enough to be shown as
+    // one. Only our own proxy URL gets the flag — a third-party poster URL is
+    // already whatever size the source page advertised, and appending a query
+    // to it could break it.
+    thumbnail: /\/api\/videos\/[^/]+\/thumb\.jpg$/i.test(poster) ? `${poster}?poster=1` : poster,
     duration: v.durationSec
       ? `${Math.floor(v.durationSec / 60)}:${String(v.durationSec % 60).padStart(2, '0')}`
       : '',

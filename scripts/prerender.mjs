@@ -32,6 +32,7 @@
  *
  * Run by `npm run build`; can also be run on its own after a build.
  */
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,11 +93,54 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{2,}$/
 const headFor = (video) => buildHead(SITE_URL, video, { verification: VERIFICATION })
 const withHead = (shell, head) => applyHead(shell, head, { basePath, preconnect: PRECONNECT })
 
+const NEUTRAL_TITLE = `<title>${SITE_NAME}</title>`
+
+/**
+ * The head `functions/_middleware.ts` injects a video's own tags into. It must
+ * hold nothing that buildHead() also writes: applyHead() replaces <title> and
+ * the robots tag only, so a leftover og:* here would be read INSTEAD of the
+ * video's title and caption on a page for a video published after the build.
+ */
+const SHELL_HEAD = [
+  NEUTRAL_TITLE,
+  `<meta name="robots" content="noindex, follow" />`,
+  ...(VERIFICATION ? [`<meta name="google-site-verification" content="${escapeHtml(VERIFICATION)}" />`] : []),
+].join('\n    ')
+
+const NEUTRAL_DESCRIPTION = `${SITE_NAME} — every clip has its own page, with its own thumbnail and its caption. 18+ only.`
+
+/**
+ * A preview card for the site itself.
+ *
+ * A chat app that is handed the home page (or a `#/watch/<id>` link, whose hash
+ * never reaches the server) has nothing to show: no og:title, no image, no
+ * description — a bare URL. These tags give that paste a labelled card. The
+ * page stays `noindex, follow`, so this is a human-facing preview only.
+ *
+ * `public/og-cover.jpg` is the image. It is optional on purpose: with the file
+ * present the card is branded, without it the card is text-only, and either way
+ * no specific video is named here (that is a video page's job, and the home page
+ * must keep listing none).
+ */
+const hasCover = existsSync(join(root, 'public', 'og-cover.jpg'))
+const COVER_URL = `${SITE_URL}/og-cover.jpg`
+
 const NEUTRAL_HEAD = [
-  `<title>${SITE_NAME}</title>`,
+  NEUTRAL_TITLE,
   // "follow" keeps the crawl flowing through the catalogue to the video pages;
   // "noindex" stops the shell (no per-video content) from competing with them.
   `<meta name="robots" content="noindex, follow" />`,
+  `<meta name="description" content="${escapeHtml(NEUTRAL_DESCRIPTION)}" />`,
+  `<meta property="og:type" content="website" />`,
+  `<meta property="og:site_name" content="${SITE_NAME}" />`,
+  `<meta property="og:title" content="${SITE_NAME}" />`,
+  `<meta property="og:description" content="${escapeHtml(NEUTRAL_DESCRIPTION)}" />`,
+  `<meta property="og:url" content="${escapeHtml(`${SITE_URL}/`)}" />`,
+  ...(hasCover ? [`<meta property="og:image" content="${escapeHtml(COVER_URL)}" />`] : []),
+  `<meta name="twitter:card" content="${hasCover ? 'summary_large_image' : 'summary'}" />`,
+  `<meta name="twitter:title" content="${escapeHtml(SITE_NAME)}" />`,
+  `<meta name="twitter:description" content="${escapeHtml(NEUTRAL_DESCRIPTION)}" />`,
+  ...(hasCover ? [`<meta name="twitter:image" content="${escapeHtml(COVER_URL)}" />`] : []),
   ...(VERIFICATION ? [`<meta name="google-site-verification" content="${escapeHtml(VERIFICATION)}" />`] : []),
 ].join('\n    ')
 
@@ -174,7 +218,7 @@ async function main() {
   // with the video's live metadata so it is INDEXABLE immediately instead of
   // waiting for the next build — and the app renders the video from the feed.
   await mkdir(join(dist, 'v'), { recursive: true })
-  await writeFile(join(dist, 'v', '_shell.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
+  await writeFile(join(dist, 'v', '_shell.html'), withHead(shell, SHELL_HEAD), 'utf8')
 
   console.log(
     `✓ prerendered ${videos.length} video page(s), admin page, sitemap.xml (${videos.length} URL${videos.length === 1 ? '' : 's'}) and robots.txt for ${SITE_URL}`,

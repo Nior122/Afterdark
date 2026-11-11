@@ -39,6 +39,8 @@
  *                                    Referer) so hotlink protection can't
  *                                    break playback; embeds keep their player URL.
  *   GET  /api/videos/:id/thumb.jpg   Thumbnail proxy (the video's real poster,
+ *                                    add ?poster=1 for the largest one on record
+ *                                    — what a chat preview card wants)
  *                                    external posters proxied for the same reason)
  *   GET  /api/settings             Runtime site config: mode, redirect, ads
  *   GET  /api/admin/views/daily    Daily view totals (Lagos-day buckets, 7-day history)
@@ -1263,6 +1265,15 @@ function mediaStreamUrl(video, origin) {
     : null
 }
 
+/** `GET /api/videos/:id/thumb.jpg?poster=1` — the largest poster on record. */
+function posterRequested(request) {
+  try {
+    return new URL(request.url).searchParams.get('poster') === '1'
+  } catch {
+    return false
+  }
+}
+
 async function handleMedia(env, id, kind, request) {
   const video = await readVideoMemo(env, id)
   if (!video) return new Response('Not found', { status: 404 })
@@ -1279,6 +1290,22 @@ async function handleMedia(env, id, kind, request) {
         : ''
     if (externalUrl) return proxyExternalMedia(externalUrl, video, request, kind)
     return new Response('Not found', { status: 404 })
+  }
+
+  // A chat app's preview card wants a BIG poster: under roughly 300x200 both
+  // WhatsApp and Telegram drop it down to a small square, which is the
+  // difference between a card and a bare link. A Telegram video thumb is fixed
+  // at 180x320 and the Bot API cannot serve a larger one, so `?poster=1` asks
+  // for the source poster this record also carries, when it has one — proxying
+  // it through us exactly like a link record's poster, so the source URL never
+  // reaches the visitor. Anything goes wrong upstream (missing, blocked, not an
+  // image) and the Telegram thumb below answers as it always did: the flag can
+  // only improve the card, never empty it. The page's own <img> never sends the
+  // flag, so grids keep loading the small file. An older Worker ignores unknown
+  // query parameters and simply returns the small thumb.
+  if (kind === 'thumb' && posterRequested(request) && video.thumbUrl) {
+    const big = await proxyExternalMedia(video.thumbUrl, video, request, 'thumb')
+    if (big && big.ok) return big
   }
 
   const upstream = await fetchTelegramFile(env, fileId, request)

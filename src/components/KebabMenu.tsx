@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useClickOutside, useEscape } from '../lib/hooks'
+import { shareUrl } from '../lib/site'
 import { useStore } from '../lib/store'
 
 interface KebabMenuProps {
@@ -34,7 +35,9 @@ export default function KebabMenu({ videoId, advertiser, onDelete, menuAlign = '
   useEscape(close, open)
 
   async function share() {
-    const url = `${window.location.origin}/watch/${videoId}`
+    // Share the video's own prerendered page: it is the only URL that carries
+    // the Open Graph tags a chat app turns into a thumbnail + caption card.
+    const url = shareUrl(videoId)
     try {
       await navigator.clipboard.writeText(url)
       setCopied(true)

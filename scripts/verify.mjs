@@ -11,6 +11,7 @@
  * - no page links to another video
  * - "/" and the unknown-path shell list no videos and are noindex
  */
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +80,23 @@ for (const name of ['index.html', '404.html', 'admin/index.html']) {
   check(`${name} has no internal links`, !/<a\s[^>]*href="\/(?!\/)/i.test(html))
 }
 
+console.log('— the site itself previews as a card')
+{
+  const html = await read('index.html')
+  check('home carries og:title, og:description and og:site_name',
+    ['og:title', 'og:description', 'og:site_name'].every((tag) => html.includes(`property="${tag}"`)),
+    html.slice(0, 400))
+  check('home asks the chat app for a card, not a bare link',
+    /name="twitter:card" content="summary(_large_image)?"/.test(html))
+  const images = [...html.matchAll(/property="og:image" content="([^"]+)"/g)].map((match) => match[1])
+  check('any home card image is an absolute URL a crawler can fetch', images.every((src) => /^https:\/\//.test(src)))
+  check('the card image exists exactly when public/og-cover.jpg is in the repo',
+    images.length === (existsSync(join(root, 'public', 'og-cover.jpg')) ? 1 : 0), String(images.length))
+  const shell = await read('v/_shell.html')
+  check('the /v/ fallback shell leaves the metadata for the middleware to inject',
+    !/property="og:(title|description|image|url)"/.test(shell))
+}
+
 console.log('— video pages')
 let pages = 0
 for (const video of videos) {
@@ -104,6 +122,9 @@ for (const video of videos) {
   check(`${video.id}: index, follow`, /<meta name="robots" content="index, follow/.test(html))
   check(`${video.id}: canonical`, new RegExp(`<link rel="canonical" href="${siteUrl}/v/${video.id}/"`).test(html))
   check(`${video.id}: Open Graph`, ['og:title', 'og:description', 'og:image', 'og:url'].every((tag) => html.includes(`property="${tag}"`)))
+  const ogImage = /property="og:image" content="([^"]+)"/.exec(html)?.[1] || ''
+  check(`${video.id}: card image is an absolute URL a chat app can fetch`,
+    /^https?:\/\//.test(ogImage), ogImage)
   check(`${video.id}: Twitter card`, ['summary_large_image', 'twitter:title', 'twitter:description', 'twitter:image'].every((tag) => html.includes(tag)))
   check(
     `${video.id}: VideoObject JSON-LD`,

@@ -274,10 +274,33 @@ should see **Owner sign-in**.
 | Page | What it is |
 | --- | --- |
 | `https://nior122.github.io/Afterdark/` | the site (catalogue, or the neutral page when direct mode is on) |
-| `https://nior122.github.io/Afterdark/v/<id>/` | one video, shareable and indexable |
+| `https://nior122.github.io/Afterdark/v/<id>/` | one video, shareable and indexable — **this** is the link to paste for a chat preview |
 | `https://nior122.github.io/Afterdark/admin/` | your dashboard |
 | `https://afterdark-bot.<you>.workers.dev/health` | Worker alive check |
 | `https://afterdark-bot.<you>.workers.dev/api/settings` | what mode is currently on |
+
+> **Sharing a link.** Every video page carries the tags chat apps read for a
+> preview, so `.../v/<id>/` shows up as a big card with the thumbnail and the
+> caption in WhatsApp, Telegram, iMessage and Discord. The address the app itself
+> shows while you watch (`.../#/watch/<id>`) is the same video, but those apps get
+> nothing from it — the part after `#` is never sent to the site, so they only see
+> the home page. Copy from the **Share** button instead of the address bar. Links
+> you pasted before can't be changed, so a preview request for `/watch/<id>` is now
+> answered by the video's own page automatically.
+>
+> A preview needs a big image to be shown big: under roughly 300×200, WhatsApp and
+> Telegram both drop the picture to a small square. A Telegram video thumb is fixed
+> at 180×320 and the Bot API cannot produce a larger one, so the preview now asks
+> the Worker for the largest poster on that record — which is the source page's own
+> image when the clip was imported from a link, and the Telegram thumb otherwise.
+> The visitor still only ever sees a `worker…/api/videos/<id>/thumb.jpg` URL, and the
+> page keeps loading the light thumb. That ask lives in the Worker, so it needs the
+> same `wrangler deploy` as everything else here; until then the preview works, with
+> the smaller picture.
+>
+> The home page's own card is text unless you add `public/og-cover.jpg` (1200×630
+> JPG, keep it under ~300 KB) — the next build puts it on the card as the site
+> image. Nothing else changes.
 
 ---
 
