@@ -511,6 +511,18 @@ const scenarios = [
         ['cta: Text WhatsApp sits under the Telegram button on the built page',
           ctas.length === 2 && ctas[0].getAttribute('data-cta') === 'telegram' &&
             ctas[1].getAttribute('href') === FUNNEL && /noopener/.test(ctas[1].getAttribute('rel') || '')],
+        // The link a chat app is handed decides whether there is a preview card
+        // at all: only the prerendered /v/<id>/ page carries its og: block, so
+        // the built bundle must copy that URL — on the origin being browsed.
+        ['share: the built Share action copies the previewable /v/ link', (() => {
+          const prompts = []
+          w.prompt = (title, value) => { prompts.push(value); return value }
+          const share = [...w.document.querySelectorAll('button')].find(
+            (button) => (button.textContent || '').trim() === 'Share',
+          )
+          share?.click()
+          return prompts.length === 1 && /^https:\/\/site\.test\/(Afterdark\/)?v\/tg-gate-1\/$/.test(prompts[0])
+        })()],
       ]
     },
   },

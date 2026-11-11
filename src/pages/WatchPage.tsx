@@ -23,6 +23,7 @@ import { useCaptureShield, videoGuardProps } from '../lib/anticapture'
 import { avatarFallbackFor } from '../lib/avatars'
 import { channelForVideo, faceForVideo } from '../lib/uploader'
 import { usePageTitle } from '../lib/hooks'
+import { shareUrl } from '../lib/site'
 import { useStore } from '../lib/store'
 import { reportVideoView } from '../lib/views'
 import { formatCount, resolveSource } from '../lib/video'
@@ -139,12 +140,15 @@ export default function WatchPage() {
     ].join('\n')
 
   async function copyLink() {
+    // The /v/ page, not /watch/: a chat preview is built from the HTML that URL
+    // serves, and only /v/<id>/ ships the card's thumbnail and caption.
+    const link = shareUrl(video!.id)
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/watch/${video!.id}`)
+      await navigator.clipboard.writeText(link)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1800)
     } catch {
-      window.prompt('Copy this link', `${window.location.origin}/watch/${video!.id}`)
+      window.prompt('Copy this link', link)
     }
   }
 

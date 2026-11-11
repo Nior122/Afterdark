@@ -1758,6 +1758,14 @@ function DailyViewsCard({ daily }: { daily: AdminDailyViews | null }) {
             , at 12:00 AM Lagos time (WAT)
             {daily && yesterday > 0 ? ` · yesterday ${yesterday.toLocaleString()}` : ''}
           </p>
+          {!daily && (
+            <p className="mt-1.5 text-[12px] leading-relaxed text-amber-600" data-daily-views-stale="">
+              Nothing to read from your Worker yet — the daily buckets live in it, so this stays an em-dash
+              until the current <code className="font-mono text-[11px]">worker/worker.js</code> is deployed
+              (dashboard → Deploy, or <code className="font-mono text-[11px]">wrangler deploy</code> in{' '}
+              <code className="font-mono text-[11px]">worker/</code>). Views count from the moment it is live.
+            </p>
+          )}
         </div>
         <div className="flex items-end gap-1.5" role="img" aria-label="Views per day, last seven days">
           {history.length === 0

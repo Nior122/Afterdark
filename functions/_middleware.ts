@@ -1,8 +1,9 @@
 /**
  * Cloudflare Pages middleware — the SEO/traffic switch for the site.
  *
- * Two jobs, both decided at request time from the Worker's `/api/settings`, so
- * the owner can change them from the bot or the dashboard without a rebuild:
+ * Three jobs shape what a request gets. Two of them are decided at request time
+ * from the Worker's `/api/settings`, so the owner can change them from the bot
+ * or the dashboard without a rebuild:
  *
  * 1. **Direct-link mode + a redirect URL set** → every HTML page that is not a
  *    video page answers a real `302` to that URL. Video pages (`/v/<id>/`), the
@@ -13,6 +14,11 @@
  * 2. **A video added after the last build** has no prerendered file. Instead of
  *    a 404 it gets the shell, which renders the video from the live feed — so
  *    "every video, old or new" works from its own link in both modes.
+ *
+ * 3. A chat app that fetches a `/watch/<id>` link for a preview is answered by
+ *    the video's own prerendered `/v/<id>/` page, so the paste gets a card with
+ *    the thumbnail and the caption instead of a bare URL. Preview agents only,
+ *    decided by User-Agent alone — see previewHop().
  *
  * If the Worker is unreachable (or `VITE_TELEGRAM_FEED_URL` is not set on the
  * Pages project) every rule falls through to the normal static site: no
@@ -64,6 +70,38 @@ const EXCLUDED_FILES = new Set([
 
 const VIDEO_PATH = /^\/v\/(?:[^/]+\/?)?$/
 const VIDEO_ANY = /^\/v\//
+/**
+ * The in-app video route (`/#/watch/<id>` style links, and the URL the app
+ * itself used to copy) renders the clip from the SPA shell — and the shell has
+ * no preview metadata, so pasting such a link unfurled as a bare URL: no
+ * card, no thumbnail, no caption. The page that carries the card is the video's
+ * own prerendered `/v/<id>/`. Only the agents that build previews are moved
+ * there; a browser keeps the SPA route exactly as before, in both site modes.
+ */
+const WATCH_PATH = /(?:^|\/)watch\/([^/?#]+)\/?$/
+const UNFURL_AGENTS =
+  /(whatsapp|telegrambot|facebookexternalhit|facebot|fban|twitterbot|twitterbrowser|xbot|discordbot|slackbot|skypebubblespreview|linkedinbot|vkshare|viber|imessagebot|applebot|bingpreview|googlebot|googleother|pinterest|snapchat|metaexternalagent|qqimagebot|weixin|micromessenger|keybase|kik|teamsbot|notionbot|airtable|zoomitbot|prerender|embedly|ifttt|zapier|redditbot|okhttp)/i
+
+/**
+ * Where a preview fetch of `/watch/<id>` should be answered instead: same
+ * origin, same sub-path prefix (a project Pages deployment can sit under one),
+ * `/v/<id>/` so it lands on the prerendered file. '' means "leave this request
+ * alone" — which is what every human request gets.
+ */
+function previewHop(request: Request, url: URL): string {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return ''
+  const match = WATCH_PATH.exec(url.pathname)
+  if (!match) return ''
+  if (!UNFURL_AGENTS.test(request.headers.get('user-agent') || '')) return ''
+  const id = match[1]
+  if (!id || id === '_' || id.startsWith('.')) return ''
+  if (HAS_EXTENSION.test(id)) return '' // an asset URL is not a video page
+  // `match.index` sits on the slash that precedes 'watch', so the slice keeps
+  // everything in front of it ('' at a domain root, '/Afterdark' on Pages).
+  const prefix = url.pathname.slice(0, match.index)
+  return `${url.origin}${prefix}/v/${id}/`
+}
+
 /** The dashboard's two canonical URL variants — served with a 200, never a 308. */
 const ADMIN_PATH = /^\/admin\/?$/
 /** Anything with a file extension is an asset request, never a page. */
@@ -227,6 +265,18 @@ export async function onRequest(context: Context): Promise<Response> {
         },
       })
     }
+  }
+
+  // A link preview fetch of the in-app route is answered by the video's own
+  // page, which carries the Open Graph card. Scoped to preview agents, so no
+  // visitor's navigation changes; `no-store` because the answer depends on the
+  // User-Agent, and a shared cache must never hand this redirect to a browser.
+  const hop = previewHop(request, url)
+  if (hop) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: hop, 'Cache-Control': 'private, no-store', Vary: 'User-Agent' },
+    })
   }
 
   if (VIDEO_ANY.test(url.pathname)) return serveVideo(context, url)
