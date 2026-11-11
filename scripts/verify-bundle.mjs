@@ -375,6 +375,37 @@ const scenarios = [
     probes: (w) => [['no CTA anchor anywhere on the grid', !w.document.querySelector('a[data-cta]')]],
   },
   {
+    name: 'dashboard: the daily views card counts the Lagos day and shows the week',
+    path: '/admin/',
+    session: { 'afterdark.admin.v1': 'probe-admin-token' },
+    fetch: onlyWorker((url) => {
+      if (url.endsWith('/api/settings')) {
+        return Promise.resolve(new Response(JSON.stringify({ mode: 'public', redirectUrl: '', ads: { ...adsFixture_ } }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/views/daily')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          day: '2026-11-04', count: 12, yesterday: 8,
+          history: [
+            { day: '2026-10-29', count: 2 }, { day: '2026-10-30', count: 5 }, { day: '2026-10-31', count: 0 },
+            { day: '2026-11-01', count: 9 }, { day: '2026-11-02', count: 4 }, { day: '2026-11-03', count: 8 },
+            { day: '2026-11-04', count: 12 },
+          ],
+        }), { status: 200 }))
+      }
+      if (url.endsWith('/api/admin/videos')) return Promise.resolve(new Response(JSON.stringify({ videos: [], total: 0, viewsTotal: 0 }), { status: 200 }))
+      if (url.endsWith('/api/admin/drafts')) return Promise.resolve(new Response(JSON.stringify({ drafts: [] }), { status: 200 }))
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+    accepted: true,
+    expect: (text) => /Views today/.test(text) && /\b12\b/.test(text) && /\+4 vs yesterday/.test(text)
+      && /at 12:00 AM Lagos time \(WAT\)/.test(text),
+    probes: (w) => [
+      ['the seven-day history strip renders', w.document.querySelectorAll('[data-daily-bar]').length === 7],
+      ['today\u2019s bar is the highlighted one',
+        [...w.document.querySelectorAll('[data-daily-bar]')].some((el) => (el.className || '').includes('bg-brand-600'))],
+    ],
+  },
+  {
     name: 'shorts: sub-minute clips get a dedicated grid on the home page',
     path: '/',
     fetch: onlyWorker(shortsWorker_),

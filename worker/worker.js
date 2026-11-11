@@ -41,6 +41,7 @@
  *   GET  /api/videos/:id/thumb.jpg   Thumbnail proxy (the video's real poster,
  *                                    external posters proxied for the same reason)
  *   GET  /api/settings             Runtime site config: mode, redirect, ads
+ *   GET  /api/admin/views/daily    Daily view totals (Lagos-day buckets, 7-day history)
  *   /api/admin/*                   Dashboard API (Bearer ADMIN_TOKEN): videos incl.
  *                                  view counts, bulk delete/recategorise, drafts,
  *                                  per-URL scrape (duplicates reported), settings
@@ -450,7 +451,55 @@ async function registerView(env, id, rawSession) {
   } catch {
     try { await env.VIDEOS.put(marker, '1') } catch { /* best effort */ }
   }
+  await bumpDailyViews(env)
   return { counted: true, views }
+}
+
+/**
+ * Daily totals for the dashboard's 'Views today' card. The bucket key names
+ * the calendar day in West Africa Time (UTC+1 all year — Nigeria never has
+ * DST), so Lagos midnight is 23:00 UTC and the counter resets exactly every
+ * 24 hours at 12 AM Nigerian time simply by moving to a new key. Only
+ * ACCEPTED (session-deduped) views bump it, which makes "real views" the
+ * same promise the per-video counters already make. Buckets carry the KV
+ * maximum 7-day expiry: old days self-delete and the surviving week doubles
+ * as the dashboard's history strip. Deletes of videos never rewrite history
+ * — a day that happened stays counted.
+ */
+const VDAY_PREFIX = 'vday:'
+const VDAY_TTL_SEC = 7 * 24 * 60 * 60 // the KV expiration ceiling — also the history window
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function lagosDayKey(atMs = Date.now()) {
+  return new Date(atMs + 3_600_000).toISOString().slice(0, 10)
+}
+
+async function bumpDailyViews(env) {
+  const key = `${VDAY_PREFIX}${lagosDayKey()}`
+  try {
+    const next = (Number(await env.VIDEOS.get(key)) || 0) + 1
+    await env.VIDEOS.put(key, String(next), { expirationTtl: VDAY_TTL_SEC })
+  } catch {
+    /* a bucket that refuses to be written must not fail the viewer's POST */
+  }
+}
+
+/** { day, count, yesterday, history: oldest → newest, seven entries } */
+async function dailyViewsSnapshot(env) {
+  const days = []
+  for (let i = 0; i < 7; i += 1) days.push(lagosDayKey(Date.now() - i * DAY_MS))
+  let values = days.map(() => 0)
+  try {
+    values = await Promise.all(days.map(async (day) => Number(await env.VIDEOS.get(`${VDAY_PREFIX}${day}`)) || 0))
+  } catch {
+    /* an unreadable store reports an honest zero, not an error */
+  }
+  return {
+    day: days[0],
+    count: values[0],
+    yesterday: values[1],
+    history: days.map((day, index) => ({ day, count: values[index] })).reverse(),
+  }
 }
 
 async function handleView(env, id, request) {
@@ -908,6 +957,12 @@ async function handleAdmin(request, env, url) {
     const result = await writeAds(env, { ...emptyAds(), enabled: Boolean(body.enabled) })
     if (result.error) return json({ error: 'bad-ads', message: result.error }, 400, cors)
     return json({ ok: true, ...(await settingsSnapshot(env, request)) }, 200, cors)
+  }
+
+  // Daily views: today's total (resets at Lagos midnight), yesterday and the
+  // self-expiring seven-day history behind the dashboard's 'Views today' card.
+  if (path === 'views/daily' && method === 'GET') {
+    return json(await dailyViewsSnapshot(env), 200, cors)
   }
 
   // --- videos ------------------------------------------------------------

@@ -77,6 +77,18 @@ function mockFetch() {
       )
     }
     if (url.endsWith('/api/admin/videos')) return new Response(JSON.stringify({ videos: adminVideos, total: adminVideos.length }), { status: 200 })
+    if (url.endsWith('/api/admin/views/daily')) {
+      return new Response(JSON.stringify({
+        day: '2026-11-04',
+        count: 7,
+        yesterday: 3,
+        history: [
+          { day: '2026-10-29', count: 0 }, { day: '2026-10-30', count: 0 }, { day: '2026-10-31', count: 0 },
+          { day: '2026-11-01', count: 0 }, { day: '2026-11-02', count: 0 }, { day: '2026-11-03', count: 3 },
+          { day: '2026-11-04', count: 7 },
+        ],
+      }), { status: 200 })
+    }
     if (url.endsWith('/api/admin/drafts')) return new Response(JSON.stringify({ drafts: adminDrafts }), { status: 200 })
     return new Response('{}', { status: 200 })
   }
@@ -297,6 +309,18 @@ async function run() {
   }]
   dom = mountApp('/admin/', 'public', true, { 'afterdark.admin.v1': 'dom-admin-token' })
   await wait(700)
+  {
+    const cardText = (dom.window.document.querySelector('[data-daily-views]')?.textContent || '').replace(/\s+/g, ' ').trim()
+    check('dashboard: Views today card totals the day',
+      /^Views today7/.test(cardText) && /\+4 vs yesterday/.test(cardText) && /yesterday 3/.test(cardText),
+      cardText.slice(0, 240))
+    check('dashboard: the card names the Lagos reset',
+      /resets in \d+h \d\dm, at 12:00 AM Lagos time \(WAT\)/.test(cardText), cardText.slice(0, 240))
+    const bars = [...dom.window.document.querySelectorAll('[data-daily-bar]')]
+    check('dashboard: seven history bars with today highlighted',
+      bars.length === 7 && bars.some((el) => /bg-brand-600/.test(el.className)) && bars.some((el) => /bg-brand-200/.test(el.className)),
+      bars.map((el) => el.className).join(' | ').slice(0, 200))
+  }
   const thumbImg = (el) => (el.getAttribute('src') || '').includes('portrait.jpg')
   let imgs = Array.from(dom.window.document.querySelectorAll('img')).filter(thumbImg)
   check(

@@ -28,6 +28,7 @@ import {
   getToken,
   setToken,
   workerMissingFields,
+  type AdminDailyViews,
   type AdminDraft,
   type AdminSettings,
   type AdminVideo,
@@ -101,6 +102,7 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<AdminSettings | null>(null)
   const [videos, setVideos] = useState<AdminVideo[]>([])
   const [viewsTotal, setViewsTotal] = useState(0)
+  const [daily, setDaily] = useState<AdminDailyViews | null>(null)
   const [drafts, setDrafts] = useState<AdminDraft[]>([])
   const [tab, setTab] = useState<Tab>('videos')
   const [error, setError] = useState('')
@@ -128,12 +130,15 @@ export default function AdminPage() {
   }, [])
 
   const loadAll = useCallback(async () => {
-    const [nextSettings, nextVideos, nextDrafts] = await Promise.all([
+    const [nextSettings, nextVideos, nextDrafts, nextDaily] = await Promise.all([
       admin.settings(),
       admin.videos(),
       admin.drafts(),
+      // A Worker predating the endpoint must never break the dashboard.
+      admin.dailyViews().catch(() => null),
     ])
     setSettings(nextSettings)
+    setDaily(nextDaily)
     setVideos(nextVideos.videos)
     setViewsTotal(nextVideos.viewsTotal)
     setDrafts(nextDrafts.drafts)
@@ -164,6 +169,16 @@ export default function AdminPage() {
   useEffect(() => {
     if (token) void signIn(token)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 'Views today' advances on its own: while the dashboard is open the daily
+  // bucket is re-read every minute, and the reset countdown moves with it.
+  useEffect(() => {
+    if (!signedIn) return
+    const timer = window.setInterval(() => {
+      void admin.dailyViews().then(setDaily).catch(() => {})
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [signedIn])
 
   /** Runs an action with the shared busy/error/notice plumbing; true on success. */
   const run = useCallback(
@@ -369,6 +384,9 @@ export default function AdminPage() {
 
       {error && <Notice tone="error">{error}</Notice>}
       {notice && <Notice tone="ok">{notice}</Notice>}
+
+      {/* Daily views — counts real (deduped) views and resets at 12:00 AM Lagos time. */}
+      <DailyViewsCard daily={daily} />
 
       {/* Mode switch */}
       <section className="mt-5 rounded-2xl border border-line bg-panel p-4">
@@ -1696,5 +1714,67 @@ function IconButton({
     >
       {children}
     </button>
+  )
+}
+
+/** Milliseconds until the next 00:00 West Africa Time (UTC+1 — Nigeria has no DST, so the boundary is fixed at 23:00 UTC). */
+function msUntilLagosMidnight(nowMs = Date.now()): number {
+  const shifted = nowMs + 3_600_000
+  return 86_400_000 - (shifted % 86_400_000)
+}
+
+function formatCountdown(ms: number): string {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60_000))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${hours}h ${String(minutes).padStart(2, '0')}m`
+}
+
+function DailyViewsCard({ daily }: { daily: AdminDailyViews | null }) {
+  const count = daily?.count ?? 0
+  const yesterday = daily?.yesterday ?? 0
+  const history = daily?.history ?? []
+  const max = Math.max(1, ...history.map((entry) => entry.count))
+  const delta = count - yesterday
+  return (
+    <section className="mt-5 rounded-2xl border border-line bg-panel p-4" data-daily-views="">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-bold text-ink">
+            <Eye size={15} className="text-brand-600" /> Views today
+          </h2>
+          <p className="mt-2 flex flex-wrap items-baseline gap-2">
+            <span className="text-[30px] font-extrabold leading-none tracking-[-0.03em] text-ink">
+              {daily ? count.toLocaleString() : '\u2014'}
+            </span>
+            {daily && delta !== 0 && (
+              <span className={`text-[12px] font-semibold ${delta > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                {delta > 0 ? `+${delta}` : String(delta)} vs yesterday
+              </span>
+            )}
+          </p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+            Real (deduplicated) views across every video · resets in {formatCountdown(msUntilLagosMidnight())}
+            , at 12:00 AM Lagos time (WAT)
+            {daily && yesterday > 0 ? ` · yesterday ${yesterday.toLocaleString()}` : ''}
+          </p>
+        </div>
+        <div className="flex items-end gap-1.5" role="img" aria-label="Views per day, last seven days">
+          {history.length === 0
+            ? Array.from({ length: 7 }, (_, index) => (
+                <span key={index} className="h-1 w-6 rounded-t bg-raise" data-daily-bar="" />
+              ))
+            : history.map((entry) => (
+                <span
+                  key={entry.day}
+                  data-daily-bar=""
+                  title={`${entry.day} · ${entry.count.toLocaleString()} view${entry.count === 1 ? '' : 's'}`}
+                  className={`w-6 rounded-t ${entry.day === daily?.day ? 'bg-brand-600' : 'bg-brand-200'}`}
+                  style={{ height: `${Math.max(3, Math.round((entry.count / max) * 44))}px` }}
+                />
+              ))}
+        </div>
+      </div>
+    </section>
   )
 }

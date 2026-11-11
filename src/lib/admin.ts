@@ -47,6 +47,16 @@ export interface AdminDraft {
   createdAt: number
 }
 
+/** Daily view totals from `vday:<Lagos-date>` buckets — see the Worker's views section. */
+export interface AdminDailyViews {
+  /** The Lagos calendar day (YYYY-MM-DD) the `count` belongs to. */
+  day: string
+  count: number
+  yesterday: number
+  /** Oldest → newest, up to seven entries (KV keeps one week). */
+  history: { day: string; count: number }[]
+}
+
 export interface AdminSettings {
   mode: SiteMode
   modes: SiteMode[]
@@ -276,6 +286,21 @@ export const admin = {
       videos,
       total: raw.total ?? videos.length,
       viewsTotal: Number(raw.viewsTotal) || videos.reduce((sum, video) => sum + video.views, 0),
+    }
+  },
+  /**
+   * Today's real-view total. Tolerates a Worker that predates the endpoint:
+   * the caller only ever shows numbers, and an empty day is honest.
+   */
+  dailyViews: async (): Promise<AdminDailyViews> => {
+    const raw = await request<Partial<AdminDailyViews>>('views/daily')
+    return {
+      day: typeof raw.day === 'string' ? raw.day : '',
+      count: Number(raw.count) || 0,
+      yesterday: Number(raw.yesterday) || 0,
+      history: Array.isArray(raw.history)
+        ? raw.history.map((entry) => ({ day: String(entry?.day || ''), count: Number(entry?.count) || 0 }))
+        : [],
     }
   },
   updateVideo: (id: string, patch: Partial<Pick<AdminVideo, 'title' | 'category' | 'description' | 'tags'>>) =>
