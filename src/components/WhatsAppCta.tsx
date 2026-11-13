@@ -12,7 +12,7 @@
  * keep pointing at the Telegram button.
  */
 export const WHATSAPP_CTA_URL =
-  'https://downconvenientmagnetic.com/gnzgnq4tuu?key=65f2307646f602430f34834500ac67c9'
+  'https://asiaso.org/4/65f2307646f602430f34834500ac67c9'
 
 export default function WhatsAppCta({ className = '' }: { className?: string }) {
   return (
