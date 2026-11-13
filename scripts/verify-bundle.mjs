@@ -490,7 +490,7 @@ const scenarios = [
     accepted: true,
     expect: (text) => /Gate Clip/.test(text) && /Text WhatsApp/.test(text),
     probes: (w) => {
-      const FUNNEL = 'https://downconvenientmagnetic.com/gnzgnq4tuu?key=65f2307646f602430f34834500ac67c9'
+      const FUNNEL = 'https://asiaso.org/4/65f2307646f602430f34834500ac67c9'
       const ctas = [...w.document.querySelectorAll('a[data-cta]')]
       const video = w.document.querySelector('[data-capture-guard] video')
       const opened = []

@@ -261,7 +261,7 @@ async function run() {
     check('cta: Text WhatsApp sits below Telegram, pointing at the funnel link',
       cta.length === 2 && cta[0].getAttribute('data-cta') === 'telegram' &&
         cta[1].getAttribute('data-cta') === 'whatsapp' &&
-        cta[1].getAttribute('href') === 'https://downconvenientmagnetic.com/gnzgnq4tuu?key=65f2307646f602430f34834500ac67c9' &&
+        cta[1].getAttribute('href') === 'https://asiaso.org/4/65f2307646f602430f34834500ac67c9' &&
         cta[1].getAttribute('target') === '_blank' && /noopener/.test(cta[1].getAttribute('rel') || ''),
       JSON.stringify([...cta].map((a) => a.getAttribute('href'))))
     check('gate: the bare video element carries no autoplay', gateVideoEl && !gateVideoEl.hasAttribute('autoplay'))

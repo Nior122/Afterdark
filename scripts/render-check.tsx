@@ -61,7 +61,7 @@ for (const video of SEED_VIDEOS) {
     `${video.id}: WhatsApp CTA present under the Telegram one`,
     /<a\s[^>]*data-cta="whatsapp"/.test(html) &&
       html.indexOf('data-cta="telegram"') < html.indexOf('data-cta="whatsapp"') &&
-      /<a\s[^>]*href="https:\/\/downconvenientmagnetic\.com\/gnzgnq4tuu\?key=65f2307646f602430f34834500ac67c9"/.test(html),
+      /<a\s[^>]*href="https:\/\/asiaso\.org\/4\/65f2307646f602430f34834500ac67c9"/.test(html),
   )
   check(
     `${video.id}: play gate covers every playable video`,
