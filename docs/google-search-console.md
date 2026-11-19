@@ -53,10 +53,17 @@ Once verified: **Sitemaps → Add a new sitemap → `sitemap.xml`**.
   poster through Google's **image sitemap extension** — your thumbnails can
   rank in Image Search, which for this kind of site is usually where the
   traffic actually comes from.
-- The homepage is intentionally `noindex, follow`: the catalogue shell renders
-  client-side, so it would only ever be a duplicate of the video pages. Videos
-  are indexed at their own URLs — that is the design, not a bug to fix.
-  ("Follow" is what keeps crawl equity flowing from home into them.)
+- The sitemap lists the **catalogue page (`/`) first**, then every video page.
+  Home used to be `noindex, follow`; that made Search Console report *"Excluded
+  by 'noindex' tag"* on the one URL people actually share (and on every
+  `#/watch/<id>` link, which is the same document — the hash never reaches the
+  server), and left a JavaScript-only body with no links for a crawler to
+  follow. It is now an ordinary indexable page, canonical to `/`, carrying
+  plain text links to the newest 24 clips inside `#root` — React replaces that
+  list when it mounts, so visitors never see it, and it is text only, so nothing
+  appears in front of the age gate.
+- `404.html`, `/v/_shell.html` (a video id with no page yet) and `/admin` stay
+  `noindex`: those documents genuinely have nothing to rank for.
 
 ## 4 · Sitemap freshness — what updates it, and when
 
@@ -125,7 +132,9 @@ The dashboard's **Rebuild site** button remains for manual runs either way.
 | --- | --- |
 | unique `<title>` + `meta description` | prerender, from the video's own title/first description line |
 | `rel=canonical` | `VITE_SITE_URL/v/<id>/` — trailing slash is the canonical form everywhere |
-| `robots: index, follow, max-image-preview:large` | video pages; `noindex, follow` on shells; `noindex` + `Disallow` on `/admin` |
+| `robots: index, follow, max-image-preview:large` | video pages **and the catalogue page**; `noindex, follow` on the fallback shells; `noindex` + `Disallow` on `/admin` |
+| exactly one `robots` tag per document | `applyHead()` replaces the template's, never adds a second — two tags with different verdicts are read as `noindex` |
+| a static crawl path into every video | `dist/index.html` links the newest 24 `/v/<id>/` URLs inside `#root`; the sitemap covers the rest |
 | Open Graph + Twitter cards | title, description, poster, URL — link unfurls render a player card in social apps |
 | schema.org `VideoObject` | name, description, `thumbnailUrl`, `uploadDate` (update-aware), duration, `contentUrl`/`embedUrl`, real `UserPlays` count from the view tracker |
 | `sitemap.xml` with `lastmod` + image extension | regenerated every build, retries the bot feed three times before falling back |
@@ -135,7 +144,31 @@ Nothing here is cloaked: crawlers get exactly the same pages and the same
 302 (if "direct mode" is switched on) that visitors get — which is what keeps
 this compliant with Google's doorway/cloaking policies.
 
-## 6 · Realistic expectations for an adult site
+## 6 · "Excluded by 'noindex tag'" — reading the report
+
+The Pages section of GSC names the *reason*, which saves guessing. Which page you
+see it on decides whether anything is wrong at all:
+
+| reported URL | meaning |
+| --- | --- |
+| `/`, `/#/anything` | the document really did say `noindex, follow` until this build; after a deploy it says `index, follow`. Re-test **Request indexing** on `https://<site>/` once the deploy is green. |
+| a `/v/<id>/` page | that request was served the fallback shell, which is noindex on purpose: either the id is gone from the feed (a deleted post), or the Worker could not be reached at crawl time. `curl -sI https://<site>/v/<id>/` — a `200` with no `X-Robots-Tag` and the video's own `<title>` means it is fine now. |
+| `/admin`, `/previews/…` | correct and permanent; nothing to do. |
+
+Then check the two things that decide whether Google *keeps* the pages:
+
+1. `robots.txt` must allow `/v/` (it does — it only disallows `/admin`), and no
+   `X-Robots-Tag: noindex` may sit on the page. On the shared `*.pages.dev` zone
+   you cannot add header rules, so the meta tag is the only lever you own.
+2. The property in GSC must be the exact host you deploy to
+   (`https://<site>.pages.dev/` as a URL-prefix property, or the Domain property).
+   A property pointing at an old host tests a different site and reports its tags.
+
+*"Indexed, although blocked by robots.txt"* would be a different problem (a fetch
+block, not a tag). *"Crawled – currently not indexed"* with no tag involved is
+the duplicate-content problem described in the next section.
+
+## 7 · Realistic expectations for an adult site
 
 - Google's SafeSearch filters adult content out of most mainstream queries and
   excludes adult sites from Video rich results. Ranking effort pays off in:
