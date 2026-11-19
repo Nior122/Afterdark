@@ -36,7 +36,11 @@ const read = (path) => readFile(join(dist, path), 'utf8')
 const catalogue = await loadCatalogue()
 const sitemap = await read('sitemap.xml')
 const robots = await read('robots.txt')
-const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1])
+const allLocs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1])
+// The catalogue page is listed as well as every video, so the numbers below are
+// about video entries only; `homeLoc` is checked on its own.
+const homeLoc = allLocs.find((loc) => !/\/v\//.test(loc)) || ''
+const locs = allLocs.filter((loc) => loc !== homeLoc)
 const lastmods = [...sitemap.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((match) => match[1])
 
 const siteUrl = (locs[0] || '').replace(/\/v\/[^/]+\/$/, '')
@@ -47,20 +51,38 @@ console.log('— sitemap & robots')
 check('sitemap lists videos', locs.length > 0)
 check('sitemap URLs are unique', new Set(locs).size === locs.length)
 check('every catalogue video is listed', catalogue.every((video) => locs.some((loc) => loc.endsWith(`/v/${video.id}/`))))
-check('lastmod values are dates', lastmods.length === locs.length && lastmods.every((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))
+check('lastmod values are dates', lastmods.length === allLocs.length && lastmods.every((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))
 check('sitemap namespace declared', sitemap.includes('http://www.sitemaps.org/schemas/sitemap/0.9'))
 check('robots allows every crawler', /User-agent:\s*\*/.test(robots) && /Allow:\s*\/\s*$/m.test(robots))
 check('robots points at the sitemap', robots.includes(`Sitemap: ${siteUrl}/sitemap.xml`), robots)
 check('robots keeps the dashboard out of the index', robots.includes('Disallow: /admin'), robots)
 check('sitemap declares the Google image extension', sitemap.includes('xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'))
+check('sitemap lists the catalogue page too', homeLoc === `${siteUrl}/`, homeLoc)
+check('every entry, home included, carries a lastmod', lastmods.length === allLocs.length)
 {
   const imageLocs = [...sitemap.matchAll(/<image:loc>([^<]+)<\/image:loc>/g)].map((match) => match[1])
   check('every sitemap entry carries its poster', imageLocs.length === locs.length && imageLocs.every((src) => /^https?:\/\//.test(src)))
 }
-check(
-  'catalogue shell invites crawlers to follow while staying out of the index',
-  /<meta name="robots" content="noindex, follow/.test(await read('index.html')),
-)
+// The reason Search Console used to report "Excluded by 'noindex' tag" on the
+// URL people actually share: the root was `noindex, follow` with a
+// JavaScript-only body, so it could neither rank nor hand a crawler a link.
+{
+  const html = await read('index.html')
+  check('the catalogue page is indexable', /<meta name="robots" content="index, follow/.test(html))
+  check('the catalogue page is canonical to itself', html.includes(`rel="canonical" href="${siteUrl}/"`), html.slice(0, 400))
+  // `href` may carry a base path (GitHub Pages builds), so only the tail is fixed.
+  const hrefs = [...html.matchAll(/<a\s[^>]*href="[^"]*\/v\/([^"/]+)\/"/g)].map((match) => match[1])
+  check('the catalogue page hands crawlers links into the videos', hrefs.length > 0, String(hrefs.length))
+  check('every one of those links is a real video page',
+    hrefs.length > 0 && hrefs.every((id) => locs.some((loc) => loc.endsWith(`/v/${id}/`))), hrefs.join(' '))
+  check('the newest videos are the ones linked',
+    hrefs[0] === ids[ids.length - 1], `${hrefs[0]} vs ${ids[ids.length - 1]}`)
+  const root = html.slice(html.indexOf('id="root"'))
+  check('the links live inside #root, so the app replaces them for people',
+    /<a\s[^>]*\/v\//.test(root))
+  check('the crawl list is text only — no media in front of the age gate',
+    !/<img|<video|background-image/i.test(root.slice(0, root.indexOf('</nav>') + 6)))
+}
 
 console.log('— shared SEO module (functions/_middleware.ts imports the same)')
 {
@@ -74,8 +96,23 @@ console.log('— shared SEO module (functions/_middleware.ts imports the same)')
   check('feed items without a source are skipped', feedToSeoVideo({ id: 'x' }) === null && feedToSeoVideo({ id: 'y', streamUrl: 's' }) !== null)
 }
 
-console.log('— root, admin and unknown paths')
-for (const name of ['index.html', '404.html', 'admin/index.html']) {
+// Two robots tags that disagree are read as `noindex` by Google, and a second
+// canonical is a hint to drop both — so the template's tags must be REPLACED by
+// prerender, never left beside the page's own.
+{
+  const docs = ['index.html', '404.html', 'admin/index.html', 'v/_shell.html', ...videos.map((video) => `v/${video.id}/index.html`)]
+  const counts = []
+  for (const name of docs) {
+    const html = await read(name)
+    counts.push([name, (html.match(/name="robots"/g) || []).length, (html.match(/rel="canonical"/g) || []).length])
+  }
+  check('every document carries exactly one robots tag', counts.every(([, robots]) => robots === 1), JSON.stringify(counts.filter(([, n]) => n !== 1)))
+  check('and at most one canonical', counts.every(([, , canonical]) => canonical <= 1),
+    JSON.stringify(counts.filter(([, , canonical]) => canonical > 1)))
+}
+
+console.log('— admin and unknown paths')
+for (const name of ['404.html', 'admin/index.html']) {
   const html = await read(name)
   check(`${name} is noindex`, /<meta name="robots" content="noindex/.test(html))
   check(`${name} lists no videos`, !videos.some((video) => html.includes(video.id) || html.includes(video.title)))
@@ -271,19 +308,34 @@ console.log('— deploy stamp (the Worker is pasted into a dashboard, so it need
   check('GET /health reports it, so "did my paste take?" is a one-second check',
     /build \$\{WORKER_BUILD\}/.test(source))
   let lastTouched = ''
+  // A shallow clone (this sandbox, a CI checkout with fetch-depth) can only see
+  // its own boundary commit, whose date says nothing about when the Worker last
+  // changed — comparing against it would invent a failure.
+  let shallow = false
   try {
-    lastTouched = execFileSync('git', ['log', '-1', '--format=%cs', '--', 'worker/worker.js'], {
+    shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
       cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim()
+    }).trim() === 'true'
   } catch {
-    lastTouched = '' // no git here (a Pages build container): nothing to compare against
+    shallow = true
+  }
+  if (!shallow) {
+    try {
+      lastTouched = execFileSync('git', ['log', '-1', '--no-merges', '--format=%cs', '--', 'worker/worker.js'], {
+        cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim()
+    } catch {
+      lastTouched = '' // no git here (a Pages build container): nothing to compare against
+    }
   }
   if (lastTouched && stamp) {
     check('the stamp is at least as new as the last commit that touched the Worker',
       stamp[1] >= lastTouched,
       `stamp ${stamp[1]} vs commit ${lastTouched} — bump WORKER_BUILD in worker/worker.js`)
   } else {
-    console.log('  · stamp-vs-git skipped (no git history in this checkout)')
+    console.log(shallow
+      ? '  · stamp-vs-git skipped (history is truncated here, so the dates prove nothing)'
+      : '  · stamp-vs-git skipped (no git history in this checkout)')
   }
 }
 

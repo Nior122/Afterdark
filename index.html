@@ -7,10 +7,13 @@
     <meta name="theme-color" content="#e11d48" />
     <meta name="rating" content="adult" />
     <!--
-      Neutral shell. scripts/prerender.mjs replaces this metadata per page:
-      /v/<id>/ gets its own title, description, social tags and VideoObject,
-      while "/" and 404 stay noindex (videos are indexed at their own URLs and
-      listed in sitemap.xml).
+      Dev/fail-safe shell. scripts/prerender.mjs replaces this metadata per
+      page: /v/<id>/ gets its own title, description, social tags and
+      VideoObject, "/" becomes an indexable catalogue page with crawl links, and
+      404/the fallback shells stay noindex. The noindex, nofollow below is what
+      a build that somehow skipped prerender ships with: an unusable shell
+      should never enter the index. One robots tag per document only — Google
+      reads two disagreeing tags as noindex.
     -->
     <meta name="robots" content="noindex, nofollow" />
     <title>AfterDark</title>

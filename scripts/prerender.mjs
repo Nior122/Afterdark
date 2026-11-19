@@ -9,9 +9,10 @@
  *                            a schema.org VideoObject block. The app is bundled
  *                            inside, so the player still works.
  *   dist/admin/index.html    the owner dashboard (noindex, not linked anywhere)
- *   dist/index.html          the catalogue shell (noindex but FOLLOWED — videos
- *                            are indexed at /v/<id>/, and the crawler still
- *                            flows through the home page to reach them)
+ *   dist/index.html          the catalogue page — INDEXABLE, and the only static
+ *                            crawl path into the video pages: it carries plain
+ *                            links to them inside #root, where the app replaces
+ *                            them on mount (see CRAWL_LINK_LIMIT)
  *   dist/404.html            same shell, for unknown paths on static hosts
  *   dist/sitemap.xml         every video URL + <lastmod> + poster (image ext.)
  *   dist/robots.txt          allow all crawlers, keep /admin out, point at the
@@ -117,7 +118,7 @@ const NEUTRAL_DESCRIPTION = `${SITE_NAME} — every clip has its own page, with 
  * A chat app that is handed the home page (or a `#/watch/<id>` link, whose hash
  * never reaches the server) has nothing to show: no og:title, no image, no
  * description — a bare URL. These tags give that paste a labelled card. The
- * page stays `noindex, follow`, so this is a human-facing preview only.
+ * the preview only — the head that carries it decides index vs noindex.
  *
  * `public/og-cover.jpg` is the image. It is optional on purpose: with the file
  * present the card is branded, without it the card is text-only, and either way
@@ -127,11 +128,8 @@ const NEUTRAL_DESCRIPTION = `${SITE_NAME} — every clip has its own page, with 
 const hasCover = existsSync(join(root, 'public', 'og-cover.jpg'))
 const COVER_URL = `${SITE_URL}/og-cover.jpg`
 
-const NEUTRAL_HEAD = [
-  NEUTRAL_TITLE,
-  // "follow" keeps the crawl flowing through the catalogue to the video pages;
-  // "noindex" stops the shell (no per-video content) from competing with them.
-  `<meta name="robots" content="noindex, follow" />`,
+/** The card every non-video page shows when it is pasted into a chat. */
+const SITE_CARD = [
   `<meta name="description" content="${escapeHtml(NEUTRAL_DESCRIPTION)}" />`,
   `<meta property="og:type" content="website" />`,
   `<meta property="og:site_name" content="${SITE_NAME}" />`,
@@ -143,8 +141,78 @@ const NEUTRAL_HEAD = [
   `<meta name="twitter:title" content="${escapeHtml(SITE_NAME)}" />`,
   `<meta name="twitter:description" content="${escapeHtml(NEUTRAL_DESCRIPTION)}" />`,
   ...(hasCover ? [`<meta name="twitter:image" content="${escapeHtml(COVER_URL)}" />`] : []),
+]
+
+/**
+ * The catalogue page — INDEXABLE, and the site's crawl path.
+ *
+ * It used to be `noindex, follow` on the theory that a shell which renders
+ * client-side would only duplicate the video pages. In practice that is the tag
+ * Search Console reports as "Excluded by 'noindex' tag" on the URL people
+ * actually share (the root, and every `#/watch/<id>` link — the hash never
+ * reaches the server, so those are this same document), and with a
+ * JavaScript-only body there was no other link into the site but the sitemap.
+ * So the root is a page like any other now: canonical, indexable, and carrying
+ * real links (below).
+ */
+const HOME_HEAD = [
+  `<title>${SITE_NAME} — short clips, each with its own page</title>`,
+  `<meta name="robots" content="index, follow, max-image-preview:large" />`,
+  `<link rel="canonical" href="${escapeHtml(`${SITE_URL}/`)}" />`,
+  ...SITE_CARD,
   ...(VERIFICATION ? [`<meta name="google-site-verification" content="${escapeHtml(VERIFICATION)}" />`] : []),
 ].join('\n    ')
+
+/** Unknown paths: the same card, kept out of the index. */
+const NOT_FOUND_HEAD = [
+  NEUTRAL_TITLE,
+  `<meta name="robots" content="noindex, follow" />`,
+  ...SITE_CARD,
+  ...(VERIFICATION ? [`<meta name="google-site-verification" content="${escapeHtml(VERIFICATION)}" />`] : []),
+].join('\n    ')
+
+/**
+ * How many videos the static page links to. A cap keeps the entry page about the
+ * site rather than a dump of everything, and the newest are the ones worth
+ * crawling first — the rest are reachable from those pages and from sitemap.xml.
+ */
+const CRAWL_LINK_LIMIT = 24
+
+/**
+ * Plain text links, INSIDE `<div id="root">`: React replaces the root's children
+ * when it mounts, so a visitor never sees this list — while a crawler reading the
+ * raw HTML (which is how it discovers links before, or without, executing script)
+ * gets a real path into every video page. Text only, no thumbnails: the age gate
+ * lives inside the app, so nothing visual is exposed in front of it.
+ */
+function crawlLinks(videos) {
+  const picks = videos.slice().reverse().slice(0, CRAWL_LINK_LIMIT)
+  if (!picks.length) return ''
+  const items = picks
+    .map((video) => {
+      const bits = [video.category, video.duration].filter(Boolean).map((bit) => escapeHtml(bit)).join(' · ')
+      return `      <li><a href="${basePath}v/${encodeURIComponent(video.id)}/">${escapeHtml(video.title)}</a>${
+        bits ? `<span> — ${bits}</span>` : ''
+      }</li>`
+    })
+    .join('\n')
+  return [
+    `<h1>${escapeHtml(SITE_NAME)}</h1>`,
+    `<p>${escapeHtml(NEUTRAL_DESCRIPTION)}</p>`,
+    '<nav aria-label="Latest clips">',
+    '    <ol>',
+    items,
+    '    </ol>',
+    '  </nav>',
+  ].join('\n    ')
+}
+
+/** Put the crawl links inside the mount point, leaving the app in charge after. */
+function withCrawlLinks(html, videos) {
+  const inner = crawlLinks(videos)
+  if (!inner) return html
+  return html.replace(/<div id="root"><\/div>/, `<div id="root">\n    ${inner}\n  </div>`)
+}
 
 /**
  * Bot-published videos, so they get their own page and sitemap entry too.
@@ -221,10 +289,10 @@ async function main() {
   await writeFile(join(dist, 'sitemap.xml'), sitemapXml(SITE_URL, videos, covers), 'utf8')
   await writeFile(join(dist, 'robots.txt'), robotsTxt(SITE_URL), 'utf8')
 
-  // Catalogue shell + unknown-path fallback: neutral, noindex (but follow),
-  // no video list.
-  await writeFile(join(dist, 'index.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
-  await writeFile(join(dist, '404.html'), withHead(shell, NEUTRAL_HEAD), 'utf8')
+  // The catalogue page is the crawl path; the unknown-path fallback stays
+  // neutral — noindex (but follow), listing nothing.
+  await writeFile(join(dist, 'index.html'), withCrawlLinks(withHead(shell, HOME_HEAD), videos), 'utf8')
+  await writeFile(join(dist, '404.html'), withHead(shell, NOT_FOUND_HEAD), 'utf8')
 
   // A video page for an id that has no prerendered file (posted after this
   // build). functions/_middleware.ts serves this file with a 200 — rebuilt
@@ -234,7 +302,7 @@ async function main() {
   await writeFile(join(dist, 'v', '_shell.html'), withHead(shell, SHELL_HEAD), 'utf8')
 
   console.log(
-    `✓ prerendered ${videos.length} video page(s), admin page, sitemap.xml (${videos.length} URL${videos.length === 1 ? '' : 's'}) and robots.txt for ${SITE_URL}`,
+    `✓ prerendered ${videos.length} video page(s) + the catalogue page, admin page, sitemap.xml (${videos.length + 1} URL${videos.length === 0 ? '' : 's'}) and robots.txt for ${SITE_URL}`,
   )
 }
 

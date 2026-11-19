@@ -194,7 +194,8 @@ export function applyHead(shell, head, { basePath = '/', preconnect = '' } = {})
 }
 
 /**
- * sitemap.xml with the Google image extension — every video page carries its
+ * sitemap.xml with the Google image extension: the catalogue root first, then
+ * every video page. Every video page carries its
  * poster so Image Search can attribute it, and <lastmod> follows the newest
  * of (updated, added) so re-titles/re-posters refresh the crawl signal.
  *
@@ -203,7 +204,7 @@ export function applyHead(shell, head, { basePath = '/', preconnect = '' } = {})
  * hotlink-blocked or slow, and Google treats a sitemap image it cannot read as
  * noise.
  */
-export function sitemapXml(siteUrl, videos, covers = new Map()) {
+export function sitemapXml(siteUrl, videos, covers = new Map(), { includeHome = true } = {}) {
   const entries = videos.map((video) => {
     // Only a real image gets an <image:image> block: the placeholder is a
     // stand-in for the UI, never something to advertise to Image Search.
@@ -223,10 +224,22 @@ export function sitemapXml(siteUrl, videos, covers = new Map()) {
       '  </url>',
     ].filter(Boolean).join('\n')
   }).join('\n')
+  // The catalogue root is listed too, and first: it is the one URL a crawler can
+  // reach without the sitemap, and it now carries real links to the videos. Its
+  // <lastmod> is the newest video's date, which is honestly when that page
+  // changed.
+  const root = siteUrl.replace(/\/+$/, '')
+  const newest = videos.reduce((best, video) => {
+    const day = isoDate(video.updatedAt || video.addedAt).slice(0, 10)
+    return day > best ? day : best
+  }, LAUNCH_DATE)
+  const homeEntry = includeHome
+    ? ['  <url>', `    <loc>${escapeXml(`${root}/`)}</loc>`, `    <lastmod>${newest}</lastmod>`, '  </url>'].join('\n')
+    : ''
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">',
-    entries,
+    [homeEntry, entries].filter(Boolean).join('\n'),
     '</urlset>',
     '',
   ].join('\n')
